@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PT Tools for Blender</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5b6475; --line: #dde1e8;
+    --accent: #2b5fb4; --note: #eef4ff; --warn: #fff6e0; --code: #eef0f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15181e; --card: #1d2129; --text: #e4e7ee; --muted: #a2a9b8; --line: #323846;
+      --accent: #7aa7f0; --note: #1d2a40; --warn: #3a3020; --code: #262b35;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15181e; --card: #1d2129; --text: #e4e7ee; --muted: #a2a9b8; --line: #323846;
+    --accent: #7aa7f0; --note: #1d2a40; --warn: #3a3020; --code: #262b35;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 30px; margin: 8px 0 4px; }
+  h2 { font-size: 23px; margin: 44px 0 10px; padding-top: 10px; border-top: 2px solid var(--line); }
+  h3 { font-size: 18px; margin: 26px 0 6px; }
+  p.lead { color: var(--muted); margin-top: 0; }
+  a { color: var(--accent); }
+  nav { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; margin: 18px 0; }
+  nav a { margin-right: 14px; white-space: nowrap; line-height: 1.9; }
+  ol.steps { padding-left: 22px; }
+  ol.steps li, ul li { margin: 5px 0; }
+  code, kbd { background: var(--code); border-radius: 4px; padding: 1px 5px; font-size: 14px; word-break: break-word; }
+  kbd { border: 1px solid var(--line); }
+  pre { background: var(--code); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-size: 14px; }
+  pre code { background: none; padding: 0; }
+  figure { margin: 14px 0; }
+  figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+  figcaption { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; align-items: start; }
+  .note, .warn { border-radius: 8px; padding: 10px 14px; margin: 14px 0; }
+  .note { background: var(--note); }
+  .warn { background: var(--warn); }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; background: var(--card); }
+  td, th { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>PT Tools for Blender</h1>
+<p class="lead">Convert Priston Tale game files and work with them in Blender 4.2 or newer (tested on 5.2):
+maps, weapons and items, monsters and characters, with textures, skeletons and animation.
+(Using 3ds Max? Open <code>Guide_3dsMax.html</code> instead.)</p>
+
+<nav>
+  <a href="#package">1. What you get</a>
+  <a href="#install">2. Install</a>
+  <a href="#convert">3. Convert</a>
+  <a href="#import">4. Import</a>
+  <a href="#maps">5. Maps</a>
+  <a href="#weapons">6. Weapons &amp; items</a>
+  <a href="#monsters">7. Monsters</a>
+  <a href="#characters">8. Characters</a>
+  <a href="#original">9. Original ASE files</a>
+  <a href="#export">10. Export</a>
+  <a href="#game">11. Back into the game</a>
+  <a href="#help">Problems?</a>
+</nav>
+
+<h2 id="package">1. What you get</h2>
+<div class="table-wrap"><table>
+  <tr><th>File / folder</th><th>What it is</th></tr>
+  <tr><td><code>PT_SMD2ASE.exe</code></td><td>The converter: game <code>.smd</code> files → <code>.ase</code> files. Nothing to install.</td></tr>
+  <tr><td><code>Blender\pt_ase_importer.zip</code></td><td>The Blender add-on: importer, exporter and motion list.</td></tr>
+  <tr><td><code>smd2ase.exe</code></td><td>The same converter for the command line (optional).</td></tr>
+  <tr><td><code>3dsMax\</code></td><td>The 3ds Max plug-in (see the 3ds Max guide).</td></tr>
+  <tr><td><code>Source\</code></td><td>All source code.</td></tr>
+</table></div>
+
+<!-- ============================================================ INSTALL -->
+<h2 id="install">2. Install</h2>
+<h3>The converter</h3>
+<p>Nothing to install. It runs on Windows 10 and 11. If Windows says <i>"Windows protected your PC"</i>, click
+<b>More info → Run anyway</b> (the program isn't signed).</p>
+
+<h3>The Blender add-on (once)</h3>
+<ol class="steps">
+  <li><b>Edit → Preferences…</b>, then click <b>Get Extensions</b>.</li>
+  <li>Click the small <b>⌄</b> at the far right of the top row (the one right of <i>Repositories</i>).</li>
+  <li>Choose <b>Install from Disk…</b> and pick <code>Blender\pt_ase_importer.zip</code>.</li>
+</ol>
+<div class="row">
+  <figure><img src="Guide_images/blender_1_prefs.png" alt="Blender preferences, Get Extensions">
+    <figcaption>If Blender asks about online access, <i>Continue Offline</i> is fine.</figcaption></figure>
+  <figure><img src="Guide_images/blender_2_install_from_disk.png" alt="Install from Disk"></figure>
+</div>
+<div class="note">To update, install the new zip the same way. It replaces the old version.</div>
+
+<!-- ============================================================ CONVERT -->
+<h2 id="convert">3. Convert the game files</h2>
+<ol class="steps">
+  <li>Double-click <b>PT_SMD2ASE.exe</b>.</li>
+  <li>Choose an <b>Output folder</b> (or keep the one shown).</li>
+  <li>Drag an <code>.smd</code> file, or a whole folder, onto the big box at the top. A single file converts straight away.</li>
+  <li>For a folder, the window shows how many files it found and how long it will take. Tick
+      <b>I understand, continue</b> and click <b>Convert</b>.</li>
+  <li>Click <b>Open</b> to see the results.</li>
+</ol>
+<div class="row">
+  <figure><img src="Guide_images/convert_done.png" alt="Converter after converting a monster and a character">
+    <figcaption>Done. For animated models the log shows the skeleton and the number of motions.</figcaption></figure>
+  <figure><img src="Guide_images/convert_folder.png" alt="Converter with the folder warning">
+    <figcaption>A whole folder: tick the box, then Convert.</figcaption></figure>
+</div>
+
+<h3>Where the game files are</h3>
+<p>Inside your Priston Tale folder:</p>
+<div class="table-wrap"><table>
+  <tr><th>Folder</th><th>Contains</th></tr>
+  <tr><td><code>Field\</code></td><td>Maps, plus the objects placed on them (trees, buildings, animated props)</td></tr>
+  <tr><td><code>image\Sinimage\Items\DropItem\</code></td><td>Weapons (<code>itW…</code>), armour, shields and other items</td></tr>
+  <tr><td><code>char\monster\</code></td><td>Monsters, one folder each</td></tr>
+  <tr><td><code>char\tmABCD\</code></td><td>Player armour (bodies), heads and costumes</td></tr>
+  <tr><td><code>char\npc\</code></td><td>NPCs</td></tr>
+</table></div>
+
+<h3>Converter options</h3>
+<div class="table-wrap"><table>
+  <tr><th>Option</th><th>What it does</th></tr>
+  <tr><td>Copy + decrypt textures</td><td>The game's textures are scrambled. This writes readable copies into a <code>textures</code>
+      folder in the output folder. <b>Leave it ticked.</b></td></tr>
+  <tr><td>Baked vertex lighting</td><td>Keeps the game's lighting and shadows on maps. Untick it for maps you will put back into the game.</td></tr>
+  <tr><td>Stage lights</td><td>Writes a map's light points (lamps, fires) as lights.</td></tr>
+  <tr><td>Split maps into separate objects</td><td>Cuts a map into separate objects (buildings, trees, terrain…), close to
+      how the original <code>.ase</code> files were made. Untick it to get the whole map as one mesh.</td></tr>
+  <tr><td>Collision walls</td><td>The invisible walls of a map: <i>separate object</i> (easy to hide), <i>keep in mesh</i>, or <i>remove</i>.</td></tr>
+  <tr><td>Convert</td><td><i>Everything</i>, <i>Terrain maps only</i>, or <i>Objects, characters, monsters</i> (skips map terrain).</td></tr>
+</table></div>
+<div class="note"><b>Keep the output folder together.</b> The <code>.ase</code> files need the <code>textures</code> folder.
+Player armour and heads also need their class animation file (<code>m1_motions.ase</code> … <code>m8_motions.ase</code>),
+which the converter writes into the same folder.</div>
+<p>Command line, for scripts: <code>smd2ase.exe &lt;file or folder&gt; -o &lt;output folder&gt; --textures</code>.
+Run <code>smd2ase.exe --help</code> for every option.</p>
+
+<!-- ============================================================ IMPORT -->
+<h2 id="import">4. Import into Blender</h2>
+<ol class="steps">
+  <li><b>File → Import → Priston Tale / 3ds Max ASE (.ase)</b>.</li>
+  <li>Select one or more <code>.ase</code> files (<kbd>Ctrl</kbd>/<kbd>Shift</kbd>-click for several). Check the options on the right.</li>
+  <li>Click <b>Import PT ASE</b>. A progress bar runs at the bottom (<kbd>Esc</kbd> cancels). When it's done, the view zooms to what you
+      imported and switches to <b>Material Preview</b> so the textures show.</li>
+</ol>
+<div class="row">
+  <figure><img src="Guide_images/blender_3_import_menu.png" alt="File > Import menu"></figure>
+  <figure><img src="Guide_images/blender_import_options.png" alt="Import options on the right of the file browser">
+    <figcaption>The import options, on the right of the file browser.</figcaption></figure>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>Option</th><th>What it does</th></tr>
+  <tr><td>Shading</td><td><i>Game look (unlit)</i> shows the model exactly as the game does and ignores your lights.
+      <i>Lit (Principled)</i> keeps the textures and lets your own lights and sky shade it.</td></tr>
+  <tr><td>Scale</td><td>Default 0.01, so a map is a few hundred metres across. Use the same value for everything so maps keep lining up.</td></tr>
+  <tr><td>Baked vertex lighting</td><td>Uses the game's lighting stored in the map.</td></tr>
+  <tr><td>Lightmaps / texture layers</td><td>Dungeons and newer maps have a second, pre-lit texture layer.</td></tr>
+  <tr><td>Import lights</td><td>Brings in a map's light points.</td></tr>
+  <tr><td>Skeleton (Armature + skin)</td><td>Characters and monsters get an Armature with the mesh skinned to it. Untick for a plain mesh.</td></tr>
+  <tr><td>Animated / T-pose</td><td><i>Animated</i> loads every animation and the motion list. <i>T-pose</i> loads only the bones, in their rest pose.</td></tr>
+  <tr><td>Animation file</td><td>Optional. Pick a motions file yourself (see <a href="#original">section 9</a>).</td></tr>
+  <tr><td>Hide collision walls</td><td>Puts the invisible walls in a hidden collection.</td></tr>
+  <tr><td>Smooth shading</td><td>Smooth instead of faceted surfaces.</td></tr>
+  <tr><td>Frame imported map / Show textures</td><td>Zoom to the result and switch to Material Preview. Untick to keep your current view.</td></tr>
+  <tr><td>Extra texture folder</td><td>Another folder to look for textures in, by file name. The game's own scrambled textures work here too.</td></tr>
+</table></div>
+
+<!-- ============================================================ MAPS -->
+<h2 id="maps">5. Maps</h2>
+<ul>
+  <li>Convert a map's <code>.smd</code> from <code>Field\</code>, or the whole <code>Field</code> folder.</li>
+  <li>Import the <code>.ase</code>. Maps keep their real position in the world, so importing several makes them line up
+      exactly as in the game.</li>
+  <li>The map comes in as separate objects: terrain, buildings, trees, walls. They are listed in the Outliner under <code>&lt;map&gt;_root</code>.
+      Each name ends with the object's main texture (<code>village-1_017_sod_roof</code>), because the game file keeps
+      the objects apart but not their names.</li>
+  <li>Every object has its pivot in its own middle, so the move gizmo appears on the object you select.</li>
+  <li>The split is close to the original files but not exact: copies of the same thing next to each other
+      (a row of torches) can come out as one object, and some big objects in a few pieces. Attach or detach as you like;
+      the game joins everything into one map anyway.</li>
+  <li>The invisible collision walls go into a hidden <code>&lt;map&gt;_collision</code> collection.</li>
+  <li>Objects placed on the map (trees, houses, windmills) are separate <code>.ase</code> files in the same zone folder. Import them as well.</li>
+  <li>The first time, Blender takes a few seconds to compile its shaders before the textures appear.</li>
+</ul>
+<figure><img src="Guide_images/blender_map.png" alt="A map split into separate objects">
+  <figcaption>A map split into its objects: the selected gate is one of them, highlighted in the Outliner.</figcaption></figure>
+
+<!-- ============================================================ WEAPONS -->
+<h2 id="weapons">6. Weapons and items</h2>
+<ul>
+  <li>Convert files from <code>image\Sinimage\Items\DropItem\</code>. Names starting with <code>itW</code> are weapons;
+      the other <code>it…</code> files are armour, shields and other items.</li>
+  <li>Import the <code>.ase</code>. Weapons and items are plain textured models with no skeleton.</li>
+</ul>
+<figure><img src="Guide_images/blender_weapon.png" alt="A weapon imported in Blender">
+  <figcaption>An axe (<code>itWA105</code>).</figcaption></figure>
+
+<!-- ============================================================ MONSTERS -->
+<h2 id="monsters">7. Monsters</h2>
+<ul>
+  <li>Convert a monster's <code>.smd</code> from its folder in <code>char\monster\</code>. Each monster's
+      animation is stored inside its own <code>.ase</code>, so you only need that one file.</li>
+  <li>Monsters with several detail levels keep only the high-detail model.</li>
+  <li>Import with <b>Animated</b>. The monster comes in as an Armature with the mesh skinned to it and all its animation
+      (walk, run, attack, damage, die…).</li>
+  <li>Press <kbd>N</kbd> in the 3D view and open the <b>PT</b> tab to play the motions (see <a href="#motions">Playing motions</a>).</li>
+</ul>
+<div class="note">Some monsters have a second file for their death (for example <code>…-die.smd</code>). Convert and import it the same way.
+A few monsters keep their animation in a separate motion file (for example <code>MonGknight-model</code> uses <code>mGknight</code>);
+the converter still puts the animation in the <code>.ase</code> so you can watch it.</div>
+
+<!-- ============================================================ CHARACTERS -->
+<h2 id="characters">8. Characters</h2>
+<p>Player armour (bodies), heads and costumes are in <code>char\tmABCD\</code>. Each class shares one animation file,
+which the converter writes next to the armour automatically:</p>
+<div class="table-wrap"><table>
+  <tr><th>File names</th><th>Class</th><th>Animation file</th></tr>
+  <tr><td><code>TmbA</code> <code>TmbB</code> <code>MmbA</code></td><td>Mechanician, Fighter, Knight</td><td><code>m1_motions.ase</code></td></tr>
+  <tr><td><code>TfbD</code> <code>MfbB</code></td><td>Archer, Atalanta</td><td><code>m2_motions.ase</code></td></tr>
+  <tr><td><code>MmbD</code></td><td>Magician</td><td><code>m3_motions.ase</code></td></tr>
+  <tr><td><code>TmbC</code></td><td>Pikeman</td><td><code>m4_motions.ase</code></td></tr>
+  <tr><td><code>MfbC</code></td><td>Priestess</td><td><code>m5_motions.ase</code></td></tr>
+  <tr><td><code>TfbE</code></td><td>Assassin</td><td><code>m6_motions.ase</code></td></tr>
+  <tr><td><code>MmbE</code></td><td>Shaman</td><td><code>m7_motions.ase</code></td></tr>
+  <tr><td><code>TfbF</code></td><td>Martial Artist</td><td><code>m8_motions.ase</code></td></tr>
+</table></div>
+<p><code>b</code> = body, <code>h</code> = head, <code>m</code>/<code>f</code> = male/female, a leading <code>C</code> = costume.
+All of them use their class's file.</p>
+<ol class="steps">
+  <li>Convert the armour (and head) you want. The class file is written into the same output folder.</li>
+  <li>Import with <b>Animated</b>. The character comes in as an Armature with the mesh skinned to it and the whole class animation.</li>
+</ol>
+
+<h3 id="motions">Playing motions</h3>
+<ol class="steps">
+  <li>Select the character (or its Armature), press <kbd>N</kbd> in the 3D view and open the <b>PT</b> tab.</li>
+  <li>Click a motion (walk, run, attack…). The timeline now runs over just that motion.</li>
+  <li>Click <b>Play</b> (or press <kbd>Space</kbd>). <b>Whole Timeline</b> shows everything again.</li>
+</ol>
+<figure><img src="Guide_images/blender_character.png" alt="A character in Blender with the PT tab">
+  <figcaption>A Knight armour with <i>walk_01</i> selected in the PT tab (top right). The motions are also marked on the timeline.</figcaption></figure>
+
+<!-- ============================================================ ORIGINAL -->
+<h2 id="original">9. Original artist ASE files</h2>
+<p>The developers' own character files (for example <code>TfbF01.ASE</code>, <code>CtfbF12.ASE</code>) only hold the model and its
+bones, so on their own they open in T-pose. To animate them:</p>
+<ol class="steps">
+  <li>Convert <b>any one</b> armour of the same class, for example <code>char\tmABCD\TfbF01.smd</code> for Martial Artist.
+      You now have <code>m8_motions.ase</code> in the output folder.</li>
+  <li>Copy the original <code>.ASE</code> files into that output folder, <b>or</b> pick <code>m8_motions.ase</code> under
+      <b>Animation file</b> in the import options.</li>
+  <li>Import with <b>Animated</b>.</li>
+</ol>
+<ul>
+  <li>If the animation file can't be found, the character comes in T-pose and the status bar says which file it looked for.</li>
+  <li>The importer puts the character on the game's own class skeleton, so it moves exactly as in the game, even when
+      the original file's bones were saved slightly differently.</li>
+  <li><b>Textures:</b> original files point to folders on the artist's computer. Set <b>Extra texture folder</b> to the
+      game's <code>char\tmABCD</code> folder, or keep the files in a converted output folder (its <code>textures</code> folder is searched).</li>
+</ul>
+
+<!-- ============================================================ EXPORT -->
+<h2 id="export">10. Export</h2>
+<ol class="steps">
+  <li>Select the objects to export. For a map, select all of its objects. If it should keep its walls, enable the hidden
+      <code>&lt;map&gt;_collision</code> collection and select those too.</li>
+  <li><b>File → Export → Priston Tale / 3ds Max ASE (.ase)</b>.</li>
+  <li>Check the options and click <b>Export PT ASE</b>. Use the original name, for example <code>fore-1.ase</code>.</li>
+</ol>
+<div class="row">
+  <figure><img src="Guide_images/blender_7_export_menu.png" alt="File > Export menu"></figure>
+  <figure><img src="Guide_images/blender_export_options.png" alt="Export options">
+    <figcaption>The export options, on the right of the file browser.</figcaption></figure>
+</div>
+<div class="table-wrap"><table>
+  <tr><th>Option</th><th>What it does</th></tr>
+  <tr><td>Selected objects only</td><td>Export the selection, or every visible object.</td></tr>
+  <tr><td>Apply modifiers</td><td>Bake modifiers (mirror, subdivision, armature pose…) into the exported mesh.</td></tr>
+  <tr><td>Vertex colours</td><td>Write the colour attribute (the game's lighting on imported maps).</td></tr>
+  <tr><td>Point lights</td><td>Write point lights as lights.</td></tr>
+  <tr><td>Copy textures next to the .ase</td><td>Copy every texture into the export folder, ready for the game.</td></tr>
+  <tr><td>Scale (non-PT objects)</td><td>Only for objects you made yourself. 100 matches the importer's default 0.01.
+      Imported models always export in exact game units.</td></tr>
+  <tr><td>Skeleton + skin</td><td>Characters and monsters: write the bones and which bone each vertex follows.</td></tr>
+  <tr><td>Animation</td><td><i>Auto</i> (recommended), <i>Always</i> or <i>Never</i> — see below.</td></tr>
+</table></div>
+<ul>
+  <li>Material names hold the game's keywords (<code>wind:</code>, <code>wall:</code>, <code>BLEND_LAMP:</code> …). Keep them:
+      renaming a material changes how the game draws it.</li>
+  <li>An imported model exports back exactly where it was. Anything you move or edit is written with its new shape.</li>
+</ul>
+
+<h3>Characters and monsters</h3>
+<p>Select the character's mesh or its Armature and export. The exporter writes everything the game needs:</p>
+<ul>
+  <li>the mesh in its <b>rest pose</b>, whatever frame the timeline is on;</li>
+  <li>every bone, written the way the game reads bones;</li>
+  <li>which bone each vertex follows (the game uses one bone per vertex: the vertex group with the largest weight wins);</li>
+  <li>the animation, depending on <b>Animation</b>:</li>
+</ul>
+<div class="table-wrap"><table>
+  <tr><th>Setting</th><th>What gets written</th></tr>
+  <tr><td><b>Auto</b> (recommended)</td><td>Monsters: their animation. Player armour and heads: no animation, because the game takes it from the
+      class file (<code>m1</code>–<code>m8</code>). Monsters whose animation lives in a separate motion file: no animation either.</td></tr>
+  <tr><td>Always</td><td>The animation, whenever there is one.</td></tr>
+  <tr><td>Never</td><td>Bones and skin only.</td></tr>
+</table></div>
+<div class="note"><b>Editing tips:</b> keep the bone names, and give every new vertex a vertex group (the export message tells you
+if any vertex has none). For new monster animation, key the bones in Pose Mode; keep each motion in its frame range
+(the PT tab shows them), because the game plays motions by frame number.</div>
+
+<!-- ============================================================ BACK TO GAME -->
+<h2 id="game">11. Putting your work back into the game</h2>
+<p>When the game finds an <code>.ase</code> without a matching <code>.smd</code>, it builds the <code>.smd</code> (and, for
+animated models, the <code>.smb</code>) itself when it starts.</p>
+<ol class="steps">
+  <li><b>Back up</b> the original files first.</li>
+  <li>Export with the <b>same name</b> as the original <code>.smd</code> (<code>fore-1.ase</code> for <code>fore-1.smd</code>,
+      <code>itWA105.ase</code> for <code>itWA105.smd</code>, <code>Tees.ase</code> for <code>Tees.smd</code>).</li>
+  <li>Copy the <code>.ase</code> and its textures into the original's game folder.</li>
+  <li>Rename or remove the old files the game should rebuild (table below), then start the game.</li>
+</ol>
+<div class="table-wrap"><table>
+  <tr><th>Model</th><th>Remove</th><th>Keep</th></tr>
+  <tr><td>Maps, map objects, weapons, items</td><td>its <code>.smd</code></td><td></td></tr>
+  <tr><td>Player armour, heads, costumes</td><td>its <code>.smd</code></td><td>the class files <code>m1.smb</code> … <code>m8.smb</code></td></tr>
+  <tr><td>Monster with its animation in the same file (e.g. <code>Tees</code>)</td><td>its <code>.smd</code> and <code>.smb</code></td><td>its <code>.inx</code></td></tr>
+  <tr><td>Monster with a separate motion file (e.g. <code>MonGknight-model</code> + <code>mGknight</code>)</td><td>the model's <code>.smd</code></td><td>the motion <code>.smb</code> (<code>mGknight.smb</code>) and the <code>.inx</code></td></tr>
+</table></div>
+<div class="warn">
+  <ul style="margin:0;padding-left:20px">
+    <li>For maps going back into the game, convert with <b>Baked vertex lighting</b> unticked, or export with
+        <b>Vertex colours</b> unticked. Otherwise the game lights them twice.</li>
+    <li>If the game shows black or missing textures, scramble them the way the game expects with
+        <code>smd2ase.exe --encode-textures "&lt;game folder of the model&gt;"</code>.</li>
+    <li>For monsters with a separate motion file, the model (mesh and skin) can be changed; their animation can't be replaced yet.</li>
+    <li>The exported files have the same layout as the developers' own files, but the game's rebuild step itself can only
+        be tested in the game. Try one file first, and keep your backups.</li>
+  </ul>
+</div>
+
+<!-- ============================================================ HELP -->
+<h2 id="help">Problems?</h2>
+<h3>The add-on doesn't appear under File → Import</h3>
+<p>Check <b>Edit → Preferences → Add-ons</b>: <i>Priston Tale ASE Import/Export</i> must be ticked. If it isn't listed, install the zip again.</p>
+<h3>The model is white, pink or untextured</h3>
+<p>Textures only show in <b>Material Preview</b> or <b>Rendered</b> view. Convert with <b>Copy + decrypt textures</b> ticked and keep the
+<code>textures</code> folder next to the <code>.ase</code> files, or set <b>Extra texture folder</b>.
+A few textures don't exist in the game at all; they're listed in <code>missing_textures.txt</code>.</p>
+<h3>A character comes in T-pose</h3>
+<p>Check that <b>Animated</b> is selected, and that the class animation file (<code>m1_motions.ase</code> … <code>m8_motions.ase</code>) is
+next to the <code>.ase</code> or picked under <b>Animation file</b>.</p>
+<h3>Nothing shows after importing</h3>
+<p>Use <b>View → Frame All</b> (<kbd>Home</kbd>). Maps sit far from the centre of the scene.</p>
+<h3>The PT tab is empty</h3>
+<p>Select the character's Armature (or its mesh). The list only shows for an imported character or monster with animation.</p>
+
+</main>
+</body>
+</html>

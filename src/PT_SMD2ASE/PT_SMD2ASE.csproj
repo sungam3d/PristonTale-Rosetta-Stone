@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Windows app (drag & drop GUI). Library sources are compiled in, so the net48 build is a single exe
+       that runs on any Windows 10/11 PC without installing anything. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>PT_SMD2ASE</AssemblyName>
+    <RootNamespace>PT_SMD2ASE</RootNamespace>
+    <ApplicationIcon>PT_SMD2ASE.ico</ApplicationIcon>
+    <Version>1.3.2</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Product>PT SMD to ASE Converter</Product>
+    <Description>Converts Priston Tale .smd map files to 3ds Max .ase</Description>
+    <Copyright>PT-World-Map project</Copyright>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="System.Numerics" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\PTSmd\*.cs" Link="PTSmd\%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 /out/
 /work/
+/release/
+/tools/dist/
+bin/
+obj/
+.vs/
+Martial Artist ASE/

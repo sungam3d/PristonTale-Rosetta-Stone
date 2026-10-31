@@ -1,0 +1,58 @@
+PT SMD -> ASE Converter v1.3 - open, edit and re-export Priston Tale models in 3ds Max and Blender
+==================================================================================================
+
+What it is
+----------
+A free tool that turns Priston Tale's game files (.smd / .smb) back into .ase files,
+the 3ds Max format the game was originally made with. Plug-ins for 3ds Max and Blender
+import them with textures, skeletons and animation, and export your edits back to .ase
+in the same layout as the developers' own files, so the game can rebuild its .smd/.smb.
+
+What you can open and export
+----------------------------
+- Maps: every zone, in its real world position, so several maps line up exactly as in
+  the game. Includes the game's lighting, lightmaps and the objects placed on the map.
+  New in v1.3: maps are split back into separate objects (terrain, buildings, trees...)
+  like the original .ase files, so you can select and edit one thing at a time.
+- Weapons and items: swords, axes, staffs, armour, shields and other drop items.
+- Monsters: skinned to their skeleton, with every animation (walk, run, attack, die...).
+  Export writes the mesh, bones, skin and animation.
+- Characters: player armour, heads and costumes on their class skeleton, with the whole
+  class animation and a clickable list of motions. Export writes the mesh, bones and
+  skin (the game takes the animation from the class file).
+- The developers' original character .ASE files can be animated too.
+
+Everything is checked against the game's own maths: models move the same as in game, and
+import -> export gives back the same bones, skin and animation.
+
+What's in the download
+----------------------
+- PT_SMD2ASE.exe   - drag and drop converter (Windows 10/11, nothing to install)
+- 3dsMax\          - import/export plug-in for 3ds Max 2020 or newer
+- Blender\         - import/export add-on for Blender 4.2 or newer
+- Guide_3dsMax.html / Guide_Blender.html - illustrated step-by-step guides
+- smd2ase.exe      - command line version
+- Source\          - all source code
+
+Quick start
+-----------
+1. Run PT_SMD2ASE.exe and drag a .smd file or a folder from your Priston Tale folder
+   onto it (Field for maps, char\monster for monsters, char\tmABCD for characters,
+   image\Sinimage\Items\DropItem for weapons).
+2. Install the plug-in for your program (see the guide).
+3. Import the .ase files. Characters and monsters come in animated - pick a motion
+   from the PT Motions list (3ds Max) or the PT tab (Blender) and press play.
+4. Edit, then export with the original file name.
+
+Putting edits back into the game
+--------------------------------
+Export with the original name, put the .ase and its textures in the game folder, remove
+the old .smd (and a monster's own .smb), and the game rebuilds them on start. The guides
+list exactly which files to remove for each kind of model. Back up first and try one
+file at a time - the game's own rebuild step can only be tested in the game.
+Not yet supported: replacing the animation of the monsters that keep it in a separate
+motion file (their mesh and skin can be changed).
+
+Download: [link]
+
+Feedback and bug reports welcome - please say which file you converted and what you saw.

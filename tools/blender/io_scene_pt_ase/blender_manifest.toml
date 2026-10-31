@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+
+id = "pt_ase_smd_importer"
+version = "1.4.1"
+name = "Priston Tale ASE Import/Export"
+tagline = "Priston Tale maps, characters and monsters as 3ds Max ASE"
+maintainer = "PT-World-Map project"
+type = "add-on"
+blender_version_min = "4.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+tags = ["Import-Export"]
+
+[permissions]
+files = "Read/write .ase files and textures; decoded textures cached in temp"

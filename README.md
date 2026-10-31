@@ -99,20 +99,98 @@ Run `python scripts\survey_models.py` and `python scripts\survey_skeletons.py`.
 
   The current reader computes every record size from the file header. It reads all 990 files and lands exactly on the end of each.
 
-## Roadmap
+## Animation data, decoded
 
-1. **Animation reader:** rotation, position and scale keys per bone, already parsed by `smdanim/smdfile.py`. Verify them against the
-   original `.ASE` files' `*TM_ANIMATION` blocks in `tmABCD` and the monster folders.
-2. **Motion tables:** parse the `.ini` files (CP949) into named frame ranges, and work out the `.inx` / `.in` link files.
-3. **Character / monster → ASE:**
-   - the mesh in bind pose, with `*PHYSIQUE` blocks;
-   - the bones as objects with hierarchy;
-   - `*TM_ANIMATION` for the whole timeline, or one named motion.
+- **Keys.** `.smb` rotation keys are deltas: orientation_i = orientation_(i-1) turned by key i (the first key is absolute).
+  Position keys are parent-relative, scale keys absolute. 160 ticks a frame, 30 fps. They are identical to the
+  `*TM_ANIMATION` samples of the original 3ds Max motion files (`scripts\verify_motion.py`: difference 0).
+- **TmPrevRot cache** (64 bytes per rotation key): the rotation the game actually uses at every key. Glued motion files
+  restart *some* bones at the first key of each piece, so the converter rebuilds every delta from this cache.
+- **Glued timelines.** `m1.smb` etc. are several motion ASE files glued end to end. The `.smb` header (count at 0x28,
+  entries at 0x2C) holds each piece's (start tick, end tick); every bone has three 32-entry tables at object offset
+  696 (rotation, position, scale): {start, end, first key, key count} per piece. The game only looks at the keys of the
+  piece being played, and a piece without keys shows the bone's static transform.
+- **`.inx`** = compiled `.ini` (`smMODELINFO`): model file, motion file, death sub-model, three LOD name groups, then
+  512 motion records (120 bytes in 2012 files, 172 now) starting at 0x18C; the count follows the array. A record holds the
+  state code (0x40 stand, 0x50 walk, 0x60 run, 0x100 attack, 0x110 damage, 0x120 die, 0x150 skill …), start/end frames
+  stored as byte0 | byte2 << 8, event frames in ticks, loop flag and the 1-based piece number.
+- **Quirks handled:** a few keys store "no turn" as w = -1 (taken the shortest way round); tiny turns need
+  `atan2(|xyz|, w)`, not `acos(w)`; Python 3.12's compensated `sum()` is avoided so C# and Python stay byte-identical.
 
-   Skeleton choice: own `.smb` → class skeleton from `.ini` / name → manual override.
-4. **3ds Max:** import bones and Skin (one bone per vertex) plus animation. Export back with `*PHYSIQUE` and bones.
-5. **Blender:**
-   - import an armature, with one vertex group per bone and an action per motion (or markers on one timeline);
-   - export back with the rigid-skinning rule enforced.
-6. **Verification:** compare against the 742 original character ASE files and the monster ASE files, the same way
-   PT-World-Map was verified against the 2012 map files.
+- **Original artist character ASEs** (e.g. `Martial Artist ASE\`) hold bones in the bind pose and no animation. The game
+  skins them on the **class skeleton**, not on the bones saved in the file: costume files (`Ctfb…`) carry older bones
+  (~1 unit off, up to 2.3) and even a different parent (`Bip01 L Thigh` under `Spine` instead of `Pelvis`), yet the game's
+  `.smd` equals the artist vertices placed on the class bones (`scripts\check_costume_bind.py`). The importers therefore
+  take rest pose + hierarchy from the class motions file when animating; extra costume bones (hair, tails) keep their
+  offset from their parent. Result: original files animate like the game (≤ 0.12 units, `scripts\blender_artist_test.py`,
+  `scripts\max_anim_compare.py --nn`).
+
+- **What the game's own ASE → SMD/SMB builder keeps** (`scripts\probe_game_reader.py`, from the developers' ASE files and
+  the .smd/.smb the game built from them): meshes **with** a material → the model (.smd, with *PHYSIQUE); meshes
+  **without** a material → the skeleton (.smb, with their *TM_ANIMATION); helper objects → ignored. So bones are
+  written as small material-less meshes (Biped's diamond, or the bone's own shape when the .smb still has it).
+- Monster layouts in the client (`scripts\survey_monster_files.py`): 264 keep model and animation in one file
+  (Tees.ase → Tees.smd + Tees.smb); ~165 use a separate motion file (MonGknight-model + mGknight), ~100 of them glued
+  from several motion ASEs listed in the original .ini (the client only ships the compiled .inx).
+
+## Map objects (v1.3.0)
+
+A stage `.smd` is one merged mesh with no object names, but the game builds it by appending every ASE object's
+vertex list as is (including unused vertices) and keeping the faces in object order (`scripts\probe_stage_ranges.py`
+on village-1: 48 objects, 48 separate vertex ranges in order). So a real object boundary always sits where every
+vertex used before a face is lower than every vertex used from it on. Those cuts are found exactly
+(`probe_stage_split.py`: 47/47), but the same test also cuts between loose parts inside one object (243 extra cuts
+on village-1; 50 000 pieces for 7 549 objects over the 26 maps whose faces did not change since 2012). Materials,
+UV records and vertex fields hold nothing per object (`probe_stage_mats.py`, `probe_stage_texlinks.py`).
+
+The converter (`_stage_parts` / `StageParts`) joins a part to the object before it when they share a material and
+lie within 300 units, or to the one before that (taking the one in between along). Rules compared with
+`probe_stage_rules.py` and `sweep_stage_parts.py`; scored with `score_stage_parts.py`: 7 611 objects for 7 787
+originals, 87% of faces in an object that is mostly one original, 83% of each original in one object. Objects are
+named `<map>_NNN_<main texture>` and get their pivot in the middle of their box, rounded to whole units (editors keep
+vertices in single precision relative to the pivot; a whole-unit pivot keeps every world position exact); `--one-mesh` / the GUI tick box gives the v1.0 output (byte-identical).
+
+## Broken mesh matrices in newer monsters (v1.3.2)
+
+Some newer monster files (d_SH\DSH, Ebonhoof, SpiritHead, Headless) carry junk in the mesh object's
+`TmInvert` (huge numbers, or all zeros). The game never uses it for a skinned mesh, since every vertex rides on
+its bone, so the monsters look fine in game, but the converter turned it into a flat or squashed `*NODE_TM` and both
+importers then placed the mesh with it. The converter now checks the matrix (last column 0 0 0 256, sensible size,
+not flat) and falls back to the stored world matrix (`_sane_tm`). Both importers also clean up a pivot before
+using it: a flat one becomes identity, and a skewed one (rows not at right angles, such as the inverse of an 8.8
+fixed-point matrix in GrimHorn or DAS) gets square axes, because object transforms in Blender and 3ds Max can't hold
+skew. Files converted with an older version therefore import correctly too. Checks: `scripts\check_ase_vs_game.py`
+(converter vs game), `blender_anim_test.py` and `max_anim_compare.py` (both now compare every skinned mesh by
+name).
+
+## Export (v1.2.0)
+
+Both exporters (Blender `ase_export_rig.py`, 3ds Max `PT_ASE_Exporter.ms` + `RigWriter` in `PT_ASE_Reader.cs`) write
+skinned models in the developers' layout: mesh in its rest pose with *PHYSIQUE (strongest bone per vertex), bones as
+material-less meshes with the exact rest numbers of the imported file, and *TM_ANIMATION (pos parent-relative,
+rotation as a turn from the previous key, 9 decimals).  Animation: *Auto* writes a model's own keys (monsters) but not
+a shared class animation (player armour) nor a monster's separate motion file (`*PT_MOTION_FILE`).
+Round trips (`scripts\roundtrip_check.py`, `static_check.py`, `blender_roundtrip.py`, `max_roundtrip.py`):
+
+| Model | Blender | 3ds Max |
+|---|---|---|
+| Tees (monster, own animation) | bones exact, skin exact, poses ≤ 0.016 | exact (≤ 0.00001) |
+| MonGknight-model (separate motion file) | exact | exact |
+| MmbA34 (player armour, class animation) | exact | exact |
+| CtfbF12 original artist costume vs the game's model | ≤ 0.009 | ≤ 0.009 |
+| fore-3 map, itWA105 weapon | exact | ≤ 0.000001 |
+
+Blender keeps faces that share their three vertices with another face (back faces of two-sided parts, doubled
+overlays) by giving them their own vertex copies; only zero-area faces are dropped.
+
+## Status (v1.1.0)
+
+Done and verified (see `src\README_SOURCE.md` for the check list):
+1. Converter (C# exe + Python): skeleton lookup (`.inx`/`.ini` → class skeleton from the file name → same-name `.smb` →
+   any `.smb` with all bones), textures found from any copy of the game folder, high-detail LOD only, bones as helpers,
+   `*PHYSIQUE`, `*TM_ANIMATION`, `*PT_ANIMATION` motion list. Player classes share `m1_motions.ase` … `m8_motions.ase`.
+2. 3ds Max: Point-helper bones, Skin (one bone per vertex), linear keys, time tags, PT Motions dialog.
+3. Blender: Armature, vertex groups + Armature modifier, linear action, timeline markers, PT tab motion list.
+
+Next:
+- Export characters back to the game (bones + `*PHYSIQUE` from Skin / vertex groups, motions back to `.ASE`).

@@ -1,0 +1,90 @@
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace PT_SMD2ASE
+{
+    static class Program
+    {
+        [STAThread]
+        static void Main(string[] args)
+        {
+#if NETFRAMEWORK
+            SetProcessDPIAware();
+#else
+            Application.SetHighDpiMode(HighDpiMode.SystemAware);
+#endif
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+
+            if (args.Length >= 5 && args[0] == "--selftest")
+            {
+                SelfTest(args[1], args[2], args[3], args[4]);
+                return;
+            }
+            // files/folders dropped onto the exe icon arrive as arguments
+            var paths = args.Where(a => File.Exists(a) || Directory.Exists(a)).ToArray();
+            Application.Run(new MainForm(paths));
+        }
+
+#if NETFRAMEWORK
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool SetProcessDPIAware();
+#endif
+
+        /// <summary>Drives the real window: folder (warning + gating), then a single file. Screenshots to shotDir.</summary>
+        static void SelfTest(string outDir, string folder, string file, string shotDir)
+        {
+            MainForm.QuietForTests = true;
+            var f = new MainForm(null);
+            var report = new System.Text.StringBuilder();
+            int step = 0;
+            var timer = new Timer { Interval = 400 };
+            void Shot(string name)
+            {
+                using (var bmp = new Bitmap(f.Width, f.Height))
+                {
+                    f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height));
+                    bmp.Save(Path.Combine(shotDir, name), ImageFormat.Png);
+                }
+            }
+            timer.Tick += (s, e) =>
+            {
+                switch (step)
+                {
+                    case 0: f.TestSetOut(outDir); Shot("cs_gui_0_start.png"); f.TestInput(new[] { folder }); step++; break;
+                    case 1:
+                        report.AppendLine("folder: warning=" + f.TestWarningVisible + " convertEnabled=" + f.TestConvertEnabled);
+                        f.TestConvert();                                            // must be ignored (not ticked)
+                        report.AppendLine("convert before tick started=" + f.TestBusy);
+                        Shot("cs_gui_1_warning.png");
+                        f.TestTick();
+                        report.AppendLine("after tick convertEnabled=" + f.TestConvertEnabled);
+                        f.TestConvert();
+                        step++;
+                        break;
+                    case 2:
+                        if (f.TestBusy) break;
+                        report.AppendLine("folder done: " + f.TestStatus);
+                        Shot("cs_gui_2_done.png");
+                        f.TestInput(new[] { file });                                // single file converts immediately
+                        step++;
+                        break;
+                    case 3:
+                        if (f.TestBusy) break;
+                        report.AppendLine("single file: warning=" + f.TestWarningVisible + " status=" + f.TestStatus);
+                        Shot("cs_gui_3_single.png");
+                        File.WriteAllText(Path.Combine(shotDir, "cs_gui_selftest.txt"), report.ToString());
+                        timer.Stop();
+                        f.Close();
+                        break;
+                }
+            };
+            f.Shown += (s, e) => timer.Start();
+            Application.Run(f);
+        }
+    }
+}

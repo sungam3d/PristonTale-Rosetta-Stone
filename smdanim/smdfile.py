@@ -58,6 +58,7 @@ OB_POS = 656                      # int px,py,pz (8.8)
 OB_NROT = 684
 OB_NPOS = 688
 OB_NSCALE = 692
+OB_FRAMES = 696                   # smFRAME_POS TmRotFrame[32], TmPosFrame[32], TmScaleFrame[32]
 
 # --- PT material keyword tables (from the game's ASE loader) ----------------------
 USE_STATE_NAMES = [
@@ -347,6 +348,12 @@ class Model(object):
             o.parent = _cstr(b[off + OB_PARENT:off + OB_PARENT + 32])
             nV, nF, nT = I(off + OB_NVERTEX), I(off + OB_NFACE), I(off + OB_NTEXLINK)
             nR, nP, nS = I(off + OB_NROT), I(off + OB_NPOS), I(off + OB_NSCALE)
+            # Per glued motion piece: (start tick, end tick, first key, key count)
+            # for the rotation, position and scale keys.  The game only looks at
+            # the keys of the piece being played.
+            npc = max(0, min(32, self.frame_counter))
+            o.frames = [[struct.unpack_from('<4i', b, off + OB_FRAMES + 512 * t + 16 * i) for i in range(npc)]
+                        for t in range(3)]
             has_phys = I(off + OB_PHYSIQUE) != 0
             o.tm = [list(struct.unpack_from('<4i', b, off + OB_TM + 16 * r)) for r in range(4)]
             o.tminv = [list(struct.unpack_from('<4i', b, off + OB_TMINV + 16 * r)) for r in range(4)]
@@ -369,7 +376,11 @@ class Model(object):
             o.scale_keys = [(fr, x / 256.0, y / 256.0, z / 256.0)
                             for (fr, x, y, z) in struct.iter_unpack('<4i', b[p:p + nS * 16])]
             p += nS * 16
-            p += nR * 64                                     # TmPrevRot cache (unused)
+            # TmPrevRot: the local rotation (rows) the game uses at each rotation
+            # key.  Usually the running product of the key deltas, but glued motion
+            # files (m1.smb ...) restart some bones at the start of each piece.
+            o.prev_rot = [struct.unpack_from('<16f', b, p + 64 * i) for i in range(nR)]
+            p += nR * 64
             o.physique = None
             if has_phys:
                 o.physique = [_cstr(b[p + 32 * i:p + 32 * i + 32]) for i in range(nV)]
