@@ -53,6 +53,7 @@ file at a time - the game's own rebuild step can only be tested in the game.
 Not yet supported: replacing the animation of the monsters that keep it in a separate
 motion file (their mesh and skin can be changed).
 
-Download: [link]
+Download: https://github.com/sungam3d/Pristontale-SMD-to-ASE-Converter/releases/latest
+Source code (MIT licence): https://github.com/sungam3d/Pristontale-SMD-to-ASE-Converter
 
 Feedback and bug reports welcome - please say which file you converted and what you saw.

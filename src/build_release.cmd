@@ -50,7 +50,8 @@ if errorlevel 8 goto :fail
 robocopy "%ROOT%\scripts" "%OUT%\Source\scripts" /E /XD __pycache__ /XF *.pyc >nul
 if errorlevel 8 goto :fail
 copy /y "%ROOT%\char2ase.py" "%OUT%\Source\char2ase.py" >nul || goto :fail
-copy /y "%ROOT%\README.md" "%OUT%\Source\README_SMD-ANIM.md" >nul || goto :fail
+copy /y "%ROOT%\docs\TECHNICAL.md" "%OUT%\Source\TECHNICAL.md" >nul || goto :fail
+copy /y "%ROOT%\LICENSE" "%OUT%\LICENSE.txt" >nul || goto :fail
 
 if /i "%1"=="standalone" (
   dotnet publish "%~dp0PT_SMD2ASE\PT_SMD2ASE.csproj" -c Release -f net8.0-windows -r win-x64 --self-contained ^

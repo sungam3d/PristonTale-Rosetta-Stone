@@ -13,7 +13,7 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>PT SMD to ASE Converter</Product>
     <Description>Converts Priston Tale .smd map files to 3ds Max .ase</Description>
-    <Copyright>PT-World-Map project</Copyright>
+    <Copyright>Copyright (c) 2026 sungam3d - MIT License</Copyright>
   </PropertyGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <Reference Include="System.Numerics" />

@@ -48,3 +48,5 @@ Artist) and keep the originals in that folder or pick the file - see the guides.
 
 Command line: smd2ase.exe --help
 Source code:  Source\  (see Source\README_SOURCE.md)
+              https://github.com/sungam3d/Pristontale-SMD-to-ASE-Converter
+Licence:      MIT (LICENSE.txt); the Blender add-on is GPL-3.0-or-later.

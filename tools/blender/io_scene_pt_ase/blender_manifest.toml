@@ -4,10 +4,11 @@ id = "pt_ase_smd_importer"
 version = "1.4.1"
 name = "Priston Tale ASE Import/Export"
 tagline = "Priston Tale maps, characters and monsters as 3ds Max ASE"
-maintainer = "PT-World-Map project"
+maintainer = "sungam3d"
 type = "add-on"
 blender_version_min = "4.2.0"
 license = ["SPDX:GPL-3.0-or-later"]
+website = "https://github.com/sungam3d/Pristontale-SMD-to-ASE-Converter"
 tags = ["Import-Export"]
 
 [permissions]

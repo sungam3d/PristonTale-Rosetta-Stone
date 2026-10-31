@@ -21,7 +21,7 @@ smdanim\                     Python reference implementation (the C# port is byt
   motion.py                  .inx / .ini motion tables, skeleton (.smb) lookup
   convert.py                 scene builder + ASE writer
 char2ase.py                  Python CLI converter
-scripts\                     verification and probe scripts (see README_SMD-ANIM.md)
+scripts\                     verification and probe scripts (see TECHNICAL.md)
 
 tools\
   build_blender_addon.py     builds tools\dist\pt_ase_importer.zip

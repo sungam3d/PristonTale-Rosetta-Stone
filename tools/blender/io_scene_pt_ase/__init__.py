@@ -12,7 +12,7 @@ File > Export > Priston Tale / 3ds Max ASE (.ase)
 
 bl_info = {
     "name": "Priston Tale ASE Import/Export",
-    "author": "PT-World-Map project",
+    "author": "sungam3d",
     "version": (1, 4, 1),
     "blender": (4, 2, 0),
     "location": "File > Import / Export > Priston Tale / 3ds Max ASE (.ase)",
