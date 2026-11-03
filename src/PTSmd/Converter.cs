@@ -225,71 +225,224 @@ namespace PTSmd
             return outl.Count > 0 ? outl : null;
         }
 
-        /// <summary>Per-piece keys -> one continuous track of (tick, key index; -1 = static value).
-        /// The game only looks at the keys of the piece being played (a piece without keys shows the
-        /// static transform), so each piece is held flat up to 1 tick before the next one starts.</summary>
-        static List<(int t, int j)> PieceTrack(List<Piece> pieces, int which, IList<int> keyTicks)
+        /// <summary>Per-piece keys -> one continuous track of (tick, key index; -1 = the piece's fixed
+        /// value, piece index). The game only looks at the keys of the piece being played, so each
+        /// piece is held flat up to 1 tick before the next one starts.</summary>
+        static List<(int t, int j, int pc)> PieceTrack(List<Piece> pieces, int which, IList<int> keyTicks,
+                                                       Func<int, bool> fixedPiece = null)
         {
-            var outl = new List<(int t, int j)>();
-            foreach (var pc in pieces)
+            var outl = new List<(int t, int j, int pc)>();
+            for (int pi = 0; pi < pieces.Count; pi++)
             {
+                var pc = pieces[pi];
                 int s = pc.S, e = pc.E, idx = pc.Idx[which], n = pc.N[which];
-                if (n <= 0 || idx < 0 || idx + n > keyTicks.Count)
+                if (n <= 0 || idx < 0 || idx + n > keyTicks.Count || (fixedPiece != null && fixedPiece(pi)))
                 {
-                    outl.Add((s, -1));
-                    outl.Add((e - 1, -1));
+                    outl.Add((s, -1, pi));
+                    outl.Add((e - 1, -1, pi));
                     continue;
                 }
-                if (keyTicks[idx] > s) outl.Add((s, idx));                         // hold the first key
+                if (keyTicks[idx] > s) outl.Add((s, idx, pi));                     // hold the first key
                 for (int j = idx; j < idx + n; j++)
                 {
                     int t = Math.Min(keyTicks[j], e - 1);
                     if (outl.Count > 0 && outl[outl.Count - 1].t >= Math.Max(t, s))
                     {
-                        outl[outl.Count - 1] = (outl[outl.Count - 1].t, j);         // same tick: later key wins
+                        outl[outl.Count - 1] = (outl[outl.Count - 1].t, j, pi);     // same tick: later key wins
                         continue;
                     }
-                    outl.Add((t, j));
+                    outl.Add((t, j, pi));
                 }
-                if (outl[outl.Count - 1].t < e - 1) outl.Add((e - 1, idx + n - 1));  // hold the last key
+                if (outl[outl.Count - 1].t < e - 1) outl.Add((e - 1, idx + n - 1, pi));   // hold the last key
             }
             return outl;
         }
 
-        static void AnimKeys(ModelObject o, GeomObject go)
+        static double[] NormQuat(double[] q)
         {
-            var pieces = Pieces(o);
-            if (pieces == null)
+            double n = Math.Sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+            if (n == 0) n = 1.0;
+            return new[] { q[0] / n, q[1] / n, q[2] / n, q[3] / n };
+        }
+
+        /// <summary>What the game shows for a node without keys (smOBJ3D::TmAnimation): Tm x
+        /// parent->TmInvert from the 8.8 world matrices -> (rotation, position, scale).</summary>
+        static (double[] q, double[] p, double[] s) EngineLocal(ModelObject o, ModelObject parent)
+        {
+            var tm = new double[4, 4];
+            for (int r = 0; r < 4; r++) for (int c = 0; c < 4; c++) tm[r, c] = o.Tm[r, c] / 256.0;
+            if (parent != null)
             {
-                go.PosKeys = new List<(int, double, double, double)>(o.PosKeys);
-                go.RotKeys = RotationKeys(o);
-                go.ScaleKeys = new List<(int, double, double, double)>(o.ScaleKeys);
-                return;
+                var ti = new double[4, 4];
+                for (int r = 0; r < 4; r++) for (int c = 0; c < 4; c++) ti[r, c] = parent.TmInv[r, c] / 256.0;
+                var m = new double[4, 4];
+                for (int r = 0; r < 4; r++)
+                    for (int c = 0; c < 4; c++)
+                    {
+                        double v = 0.0;
+                        for (int k = 0; k < 4; k++) v += tm[r, k] * ti[k, c];
+                        m[r, c] = v;
+                    }
+                tm = m;
             }
+            // a mirrored local (IceSerpent's wing bones): negative scale next to a proper rotation
+            double det = tm[0, 0] * (tm[1, 1] * tm[2, 2] - tm[1, 2] * tm[2, 1]) - tm[0, 1] * (tm[1, 0] * tm[2, 2] - tm[1, 2] * tm[2, 0])
+                       + tm[0, 2] * (tm[1, 0] * tm[2, 1] - tm[1, 1] * tm[2, 0]);
+            double sign = det < 0 ? -1.0 : 1.0;
+            var scl = new double[3];
+            var rows = new double[3, 3];
+            for (int r = 0; r < 3; r++)
+            {
+                double a = tm[r, 0], b = tm[r, 1], c = tm[r, 2];
+                double ln = Math.Sqrt(a * a + b * b + c * c);
+                if (ln == 0) ln = 1.0;
+                ln *= sign;
+                scl[r] = ln;
+                rows[r, 0] = a / ln; rows[r, 1] = b / ln; rows[r, 2] = c / ln;
+            }
+            var q = QuatFromMatrix(rows[0, 0], rows[0, 1], rows[0, 2], rows[1, 0], rows[1, 1], rows[1, 2],
+                                   rows[2, 0], rows[2, 1], rows[2, 2]);
+            return (q, new[] { tm[3, 0], tm[3, 1], tm[3, 2] }, scl);
+        }
+
+        static bool Scaled(double[] s) => Math.Abs(s[0] - 1.0) > 1e-3 || Math.Abs(s[1] - 1.0) > 1e-3 || Math.Abs(s[2] - 1.0) > 1e-3;
+
+        static (int t, double[] axis, double ang) AbsKey(int t, double[] q)
+        {
+            var aa = KeyAxisAngle(q[0], q[1], q[2], q[3]);
+            return (t, aa.axis, aa.ang);
+        }
+
+        /// <summary>(pos, rot, scale) keys reproducing what the game shows at every tick
+        /// (smOBJ3D::TmAnimation), as convert.py _anim_keys. Where the game falls back to values an
+        /// ASE does not carry they are written as keys: a channel without keys while others have
+        /// some -> the stored local value (TmRotate, px/py/pz, no scale); no keys at all (unkeyed,
+        /// bones of an animated skeleton) or a glued piece without any key -> Tm x parent->TmInvert;
+        /// single timeline: from a channel's last key on, the stored value again.</summary>
+        static void AnimKeys(ModelObject o, GeomObject go, ModelObject parent = null, int end = 0, bool unkeyed = false)
+        {
+            var staticQ = NormQuat(o.Quat);
+            var staticP = new[] { o.Pos[0], o.Pos[1], o.Pos[2] };
+            var pieces = Pieces(o);
             go.PosKeys = new List<(int, double, double, double)>();
             go.ScaleKeys = new List<(int, double, double, double)>();
             go.RotKeys = new List<(int, double[], double)>();
-            if (o.PosKeys.Count > 0)
-                foreach (var k in PieceTrack(pieces, 1, o.PosKeys.Select(x => x.t).ToList()))
-                    go.PosKeys.Add(k.j < 0 ? (k.t, o.Pos[0], o.Pos[1], o.Pos[2])
-                                           : (k.t, o.PosKeys[k.j].x, o.PosKeys[k.j].y, o.PosKeys[k.j].z));
-            if (o.ScaleKeys.Count > 0)
-                foreach (var k in PieceTrack(pieces, 2, o.ScaleKeys.Select(x => x.t).ToList()))
-                    go.ScaleKeys.Add(k.j < 0 ? (k.t, o.Scale[0], o.Scale[1], o.Scale[2])
-                                             : (k.t, o.ScaleKeys[k.j].x, o.ScaleKeys[k.j].y, o.ScaleKeys[k.j].z));
-            if (o.RotKeys.Count > 0)
+            bool has = o.PosKeys.Count > 0 || o.RotKeys.Count > 0 || o.ScaleKeys.Count > 0;
+            if (!has)
             {
-                double qn = Math.Sqrt(o.Quat.Sum(c => c * c));
-                if (qn == 0) qn = 1.0;
-                var stat = o.Quat.Select(c => c / qn).ToArray();
-                var last = new[] { 0.0, 0.0, 0.0, 1.0 };
-                foreach (var k in PieceTrack(pieces, 0, o.RotKeys.Select(x => x.t).ToList()))
+                if (!unkeyed || end <= 0) return;
+                var e0 = EngineLocal(o, parent);
+                ConstantKeys(go, e0.q, e0.p, e0.s, new[] { 0, end });
+                return;
+            }
+            if (pieces == null)
+            {
+                go.PosKeys.AddRange(o.PosKeys);
+                go.RotKeys = RotationKeys(o);
+                go.ScaleKeys.AddRange(o.ScaleKeys);
+                FillStatic(o, go);
+                if (end > 0) SnapAfterLast(go, end, staticQ, staticP);
+                return;
+            }
+            var eng = EngineLocal(o, parent);
+            // a piece the game plays without keys (smOBJ3D::TmAnimation: NumTmRot >= 0 || NumTmPos >= 0 ||
+            // NumTmScale > 0, so scale keys starting at the first one do not count - frost's weapons)
+            bool Bare(int pi) => pieces[pi].N[0] <= 0 && pieces[pi].N[1] <= 0 && !(pieces[pi].N[2] > 0 && pieces[pi].Idx[2] > 0);
+            foreach (var k in PieceTrack(pieces, 1, o.PosKeys.Select(x => x.t).ToList()))
+            {
+                if (k.j >= 0) go.PosKeys.Add((k.t, o.PosKeys[k.j].x, o.PosKeys[k.j].y, o.PosKeys[k.j].z));
+                else
                 {
-                    var p = k.j < 0 ? stat : QuatFromCache(o.PrevRot[k.j]);
-                    go.RotKeys.Add(Delta(k.t, last, p));
-                    last = p;
+                    var v = Bare(k.pc) ? eng.p : staticP;
+                    go.PosKeys.Add((k.t, v[0], v[1], v[2]));
                 }
             }
+            bool anyBare = false;
+            for (int pi = 0; pi < pieces.Count; pi++) if (Bare(pi)) anyBare = true;
+            if (o.ScaleKeys.Count > 0 || (Scaled(eng.s) && anyBare))
+                foreach (var k in PieceTrack(pieces, 2, o.ScaleKeys.Select(x => x.t).ToList(), Bare))
+                {
+                    if (k.j >= 0) go.ScaleKeys.Add((k.t, o.ScaleKeys[k.j].x, o.ScaleKeys[k.j].y, o.ScaleKeys[k.j].z));
+                    else
+                    {
+                        var v = Bare(k.pc) ? eng.s : new[] { 1.0, 1.0, 1.0 };
+                        go.ScaleKeys.Add((k.t, v[0], v[1], v[2]));
+                    }
+                }
+            var last = new[] { 0.0, 0.0, 0.0, 1.0 };
+            foreach (var k in PieceTrack(pieces, 0, o.RotKeys.Select(x => x.t).ToList()))
+            {
+                var p = k.j >= 0 ? QuatFromCache(o.PrevRot[k.j]) : (Bare(k.pc) ? eng.q : staticQ);
+                go.RotKeys.Add(Delta(k.t, last, p));
+                last = p;
+            }
+        }
+
+        static void ConstantKeys(GeomObject go, double[] q, double[] p, double[] s, int[] ticks)
+        {
+            var ts = ticks.Distinct().OrderBy(t => t).ToList();
+            foreach (int t in ts) go.PosKeys.Add((t, p[0], p[1], p[2]));
+            go.RotKeys.Add(AbsKey(ts[0], q));
+            for (int i = 1; i < ts.Count; i++) go.RotKeys.Add((ts[i], new[] { 0.0, 0.0, 0.0 }, 0.0));
+            if (Scaled(s)) foreach (int t in ts) go.ScaleKeys.Add((t, s[0], s[1], s[2]));
+        }
+
+        /// <summary>A node keyed in rotation but not in position (or the other way round): the game
+        /// uses its stored local position / rotation, written as keys (convert.py _fill_static).</summary>
+        static void FillStatic(ModelObject o, GeomObject go)
+        {
+            int first, lastT;
+            if (go.RotKeys.Count > 0) { first = go.RotKeys[0].t; lastT = go.RotKeys[go.RotKeys.Count - 1].t; }
+            else if (go.PosKeys.Count > 0) { first = go.PosKeys[0].t; lastT = go.PosKeys[go.PosKeys.Count - 1].t; }
+            else if (go.ScaleKeys.Count > 0) { first = go.ScaleKeys[0].t; lastT = go.ScaleKeys[go.ScaleKeys.Count - 1].t; }
+            else return;
+            var ts = new SortedSet<int> { first, lastT }.ToList();
+            if (go.RotKeys.Count > 0 && go.PosKeys.Count == 0)
+                foreach (int t in ts) go.PosKeys.Add((t, o.Pos[0], o.Pos[1], o.Pos[2]));
+            if (go.PosKeys.Count > 0 && go.RotKeys.Count == 0)
+            {
+                go.RotKeys.Add(AbsKey(ts[0], NormQuat(o.Quat)));
+                for (int i = 1; i < ts.Count; i++) go.RotKeys.Add((ts[i], new[] { 0.0, 0.0, 0.0 }, 0.0));
+            }
+        }
+
+        /// <summary>Single timeline: past a channel's last key the game shows the stored value again,
+        /// so a channel that ends before the skeleton gets one more key, 1 tick later.</summary>
+        static void SnapAfterLast(GeomObject go, int end, double[] staticQ, double[] staticP)
+        {
+            if (go.PosKeys.Count > 0 && go.PosKeys[go.PosKeys.Count - 1].t + 1 <= end)
+                go.PosKeys.Add((go.PosKeys[go.PosKeys.Count - 1].t + 1, staticP[0], staticP[1], staticP[2]));
+            if (go.ScaleKeys.Count > 0 && go.ScaleKeys[go.ScaleKeys.Count - 1].t + 1 <= end)
+                go.ScaleKeys.Add((go.ScaleKeys[go.ScaleKeys.Count - 1].t + 1, 1.0, 1.0, 1.0));
+            if (go.RotKeys.Count > 0 && go.RotKeys[go.RotKeys.Count - 1].t + 1 <= end)
+            {
+                var last = new[] { 0.0, 0.0, 0.0, 1.0 };              // absolute orientation at the last key
+                foreach (var k in go.RotKeys)
+                {
+                    double sn = Math.Sin(0.5 * k.ang);
+                    last = QMul(last, new[] { k.axis[0] * sn, k.axis[1] * sn, k.axis[2] * sn, Math.Cos(0.5 * k.ang) });
+                }
+                go.RotKeys.Add(Delta(go.RotKeys[go.RotKeys.Count - 1].t + 1, last, staticQ));
+            }
+        }
+
+        static int SkeletonEnd(Model skel)
+        {
+            int end = 0;
+            foreach (var b in skel.Objects)
+            {
+                if (b.PosKeys.Count > 0 && b.PosKeys[b.PosKeys.Count - 1].t > end) end = b.PosKeys[b.PosKeys.Count - 1].t;
+                if (b.RotKeys.Count > 0 && b.RotKeys[b.RotKeys.Count - 1].t > end) end = b.RotKeys[b.RotKeys.Count - 1].t;
+                if (b.ScaleKeys.Count > 0 && b.ScaleKeys[b.ScaleKeys.Count - 1].t > end) end = b.ScaleKeys[b.ScaleKeys.Count - 1].t;
+            }
+            return end;
+        }
+
+        static Dictionary<string, ModelObject> ByName(Model m)
+        {
+            var d = new Dictionary<string, ModelObject>();
+            foreach (var o in m.Objects) d[o.Name] = o;               // later ones win, as a Python dict
+            return d;
         }
 
         static (double[] axis, double ang, double[] scale) RowsToAxisAngle(double[][] rows)
@@ -331,6 +484,10 @@ namespace PTSmd
         }
 
         // ------------------------------------------------------------------ paths
+        // a char folder converted on its own keeps char\monster\<name>\ (written next to each other,
+        // same-named models overwrote each other)
+        static readonly string[] GameTopFolders = { "field", "char", "image", "effect" };
+
         public static string GuessGameRoot(string path)
         {
             string start = Path.GetDirectoryName(Path.GetFullPath(path));
@@ -338,7 +495,7 @@ namespace PTSmd
             while (true)
             {
                 string parent = Path.GetDirectoryName(d);
-                if (string.Equals(Path.GetFileName(d), "field", StringComparison.OrdinalIgnoreCase))
+                if (Array.Exists(GameTopFolders, n => string.Equals(Path.GetFileName(d), n, StringComparison.OrdinalIgnoreCase)))
                     return parent ?? d;
                 if (parent == null || parent == d) return start;
                 d = parent;
@@ -650,7 +807,7 @@ namespace PTSmd
             return outl;
         }
 
-        static GeomObject BoneObject(ModelObject b, bool keys)
+        static GeomObject BoneObject(ModelObject b, bool keys, ModelObject parent = null, int end = 0)
         {
             var w = ModelWorld(b);
             var go = new GeomObject(b.Name) { Parent = b.Parent, Rows = w.rows, Pos = w.t, IsBone = true };
@@ -672,7 +829,7 @@ namespace PTSmd
                                           new[] { 5, 4, 3 }, new[] { 5, 3, 2 }, new[] { 5, 2, 1 }, new[] { 5, 1, 4 } })
                     go.Faces.Add(new[] { f[0], f[1], f[2], 0 });
             }
-            if (keys) AnimKeys(b, go);
+            if (keys) AnimKeys(b, go, parent, end, true);
             return go;
         }
 
@@ -741,8 +898,15 @@ namespace PTSmd
             sc.Materials = mr.order;
 
             if (skel != null)
-                foreach (var b in skel.Objects) sc.Objects.Add(BoneObject(b, sc.AnimMode == "embed"));
+            {
+                var sb = ByName(skel);
+                int send = SkeletonEnd(skel);
+                foreach (var b in skel.Objects)
+                    sc.Objects.Add(BoneObject(b, sc.AnimMode == "embed", sb.TryGetValue(b.Parent, out var bp) ? bp : null, send));
+            }
             var meshNames = new HashSet<string>(meshes.Select(m => m.Name));
+            var modelByName = ByName(md);
+            int modelEnd = SkeletonEnd(md);
             foreach (var o in meshes)
             {
                 var w = ModelWorld(o);
@@ -765,7 +929,7 @@ namespace PTSmd
                 int nl = 0;
                 foreach (var l in o.FaceUVs) nl = Math.Max(nl, l.Count);
                 go.Channels = ChannelsFromLayers(o.FaceUVs, nl, false);
-                AnimKeys(o, go);
+                AnimKeys(o, go, modelByName.TryGetValue(o.Parent, out var mp) ? mp : null, modelEnd);
                 sc.Objects.Add(go);
             }
             int ticks = md.LastFrameTicks();
@@ -783,7 +947,9 @@ namespace PTSmd
                 Name = Path.GetFileNameWithoutExtension(sc.AnimFile), Kind = "motion", Source = skel.Path,
                 AnimMode = "embed", SkeletonFile = sc.SkeletonFile, Motions = sc.Motions,
             };
-            foreach (var b in skel.Objects) an.Objects.Add(BoneObject(b, true));
+            var ab = ByName(skel);
+            int aend = SkeletonEnd(skel);
+            foreach (var b in skel.Objects) an.Objects.Add(BoneObject(b, true, ab.TryGetValue(b.Parent, out var ap) ? ap : null, aend));
             an.LastFrame = Math.Max(1, skel.LastFrameTicks() / 160);
             return an;
         }

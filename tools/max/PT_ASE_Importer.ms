@@ -10,11 +10,11 @@
         opacity (TGA alpha / mask), two-sided, additive blending
       * PT collision walls go to a hidden, non-renderable layer
       * optional omni lights
-    Export: 3ds Max 2020 ships the ASCII exporter (asciiexp.dle) - the
-    "Export selected" button uses it.
+    Export: PT_ASE_Exporter.ms ("Export selected as ASE..."): meshes, materials, bones, skin,
+    animation and moving props, as the game's own builder reads them.
 
-    Install : copy PT_ASE_Importer.ms, PT_ASE_Exporter.ms + PT_ASE_Reader.cs into
-              <3ds Max>\scripts\startup\   (or run via Scripting > Run Script)
+    Install : copy PT_ASE_Importer.ms, PT_ASE_Exporter.ms, PT_ASE_Reader.cs + PT_ASE_Skin.cs
+              into <3ds Max>\scripts\startup\   (or run via Scripting > Run Script)
               then Customize > Toolbars/Menus > Category "PT Tools" > "PT ASE Import"
     Script  : PTASE_ImportFiles #(@"C:\path\map.ase")   -- progress bar + zoom to result
               PTASE_ImportFile @"C:\path\map.ase"        -- one file, no zoom (for batch use)
@@ -47,7 +47,10 @@ if PTASE_Opts.count < 9 do append PTASE_Opts true
 if PTASE_Opts.count < 10 do append PTASE_Opts #animated
 if PTASE_Opts.count < 11 do append PTASE_Opts ""
 global PTASE_AnimMissing = #()   -- animation files that were looked for but not found
+global PTASE_SkinSdk = undefined  -- PTAse.SkinSdk (PT_ASE_Skin.cs: reads Skin weights), or undefined
 
+-- PT_ASE_Reader.cs, with PT_ASE_Skin.cs (reads Skin weights through the SDK for the exporter,
+-- no Modify panel) when Autodesk.Max.dll can be referenced
 fn PTASE_Compile =
 (
     if PTASE_Asm != undefined do return true
@@ -57,13 +60,26 @@ fn PTASE_Compile =
         messageBox ("PT_ASE_Reader.cs not found next to the script:\n" + src) title:"PT ASE Importer"
         return false
     )
-    local provider = dotNetObject "Microsoft.CSharp.CSharpCodeProvider"
-    local params = dotNetObject "System.CodeDom.Compiler.CompilerParameters"
-    params.ReferencedAssemblies.Add "System.dll"
-    params.ReferencedAssemblies.Add "System.Core.dll"
-    params.GenerateInMemory = true
-    params.GenerateExecutable = false
-    local res = provider.CompileAssemblyFromFile params #(src)
+    fn compile files sdk =
+    (
+        local provider = dotNetObject "Microsoft.CSharp.CSharpCodeProvider"
+        local params = dotNetObject "System.CodeDom.Compiler.CompilerParameters"
+        params.ReferencedAssemblies.Add "System.dll"
+        params.ReferencedAssemblies.Add "System.Core.dll"
+        if sdk do params.ReferencedAssemblies.Add (pathConfig.appendPath (getDir #maxroot) "Autodesk.Max.dll")
+        params.GenerateInMemory = true
+        params.GenerateExecutable = false
+        provider.CompileAssemblyFromFile params files
+    )
+    local skinSrc = PTASE_Dir + "PT_ASE_Skin.cs"
+    local res = undefined
+    if doesFileExist skinSrc and doesFileExist (pathConfig.appendPath (getDir #maxroot) "Autodesk.Max.dll") do
+        try (res = compile #(src, skinSrc) true) catch (res = undefined)
+    PTASE_SkinSdk = undefined
+    if res != undefined and res.Errors.Count == 0 then
+        PTASE_SkinSdk = res.CompiledAssembly.CreateInstance "PTAse.SkinSdk"
+    else
+        res = compile #(src) false
     if res.Errors.Count > 0 do
     (
         local msg = "PT_ASE_Reader.cs failed to compile:\n"
@@ -206,27 +222,104 @@ fn PTASE_BuildRig sc layer root rigName:"" =
     bones
 )
 
-fn PTASE_Skin m sc idx bones =
+-- Skin modifiers for the skinned meshes #(#(mesh, object index) ...), each vertex 100% on its
+-- bone.  skinOps needs the modifier current in the Modify panel, and every panel change costs
+-- (half a second a mesh): all modifiers are added first (Create panel: instant), then each mesh
+-- is visited once.
+fn PTASE_SkinAll skinned sc bones =
 (
-    local phys = PTASE_Exec sc (sc.GetObject idx).Phys
-    local used = #()
-    for b in phys where b > 0 do appendIfUnique used b
-    if used.count == 0 do return false
-    sort used
-    max modify mode
-    select m
-    local sk = Skin()
-    addModifier m sk
-    modPanel.setCurrentObject sk
-    local slot = #()                                  -- rig bone index -> skin bone index
-    for k = 1 to used.count do
+    local todo = #()
+    max create mode
+    for s in skinned do
     (
-        skinOps.addBone sk bones[used[k]] (if k == used.count then 1 else 0)
-        slot[used[k]] = k
+        local phys = PTASE_Exec sc (sc.GetObject s[2]).Phys
+        local used = #()
+        for b in phys where b > 0 do appendIfUnique used b
+        if used.count == 0 do continue
+        sort used
+        local sk = Skin()
+        addModifier s[1] sk
+        append todo #(s[1], sk, phys, used)
     )
-    classOf m                                         -- evaluate so the skin knows its vertices
-    for v = 1 to phys.count where phys[v] > 0 do skinOps.ReplaceVertexWeights sk v slot[phys[v]] 1.0
+    if todo.count == 0 do return 0
+    max modify mode
+    for e in todo do
+    (
+        local m = e[1], sk = e[2], phys = e[3], used = e[4]
+        select m
+        if modPanel.getCurrentObject() != sk do modPanel.setCurrentObject sk
+        local slot = #()                              -- rig bone index -> skin bone index
+        for k = 1 to used.count do
+        (
+            skinOps.addBone sk bones[used[k]] (if k == used.count then 1 else 0)
+            slot[used[k]] = k
+        )
+        classOf m                                     -- evaluate so the skin knows its vertices
+        for v = 1 to phys.count where phys[v] > 0 do skinOps.ReplaceVertexWeights sk v slot[phys[v]] 1.0
+        -- vertices without a bone in the file (LavaGolem has one): Skin gives them envelope weights
+        -- whatever is set, so the exporter is told to leave them out of *PHYSIQUE again
+        local none = ""
+        for v = 1 to phys.count where phys[v] == 0 do none += ((v - 1) as string) + " "
+        if none != "" do setUserProp m "pt_unassigned" (phys.count as string + ":" + none)
+    )
+    todo.count
+)
+
+-- The game skins a vertex on its bone's bind pose as written, which can be scaled or skewed
+-- (bones at 0.89 in many monsters, 8.8 fixed-point noise in all).  written:true puts every bone
+-- there (parents first, so children are not dragged along) to bind the Skin; written:false puts
+-- them back to the rigid rest pose the animation starts from.  Skin keeps the bind it was given,
+-- so the deformation is exactly the game's and the mesh itself stays as written.
+fn PTASE_BindPose sc bones written:true =
+(
+    local rig = sc.Rig
+    local any = false
+    for i = 0 to rig.Count - 1 while not any do any = (rig.BoneBindTm i) != ""
+    if not any do return false
+    for i in (execute (rig.ParentsFirst())) do
+    (
+        local s = if written then rig.BoneBindTm (i - 1) else ""
+        bones[i].transform = execute (if s != "" then s else rig.BoneTm (i - 1))
+    )
     true
+)
+
+-- linear keys: pos / scale #(#(frame, point3) ...), rot #(#(frame, matrix3) ...), with Auto Key
+-- (MAXScript rotation key values are relative to the previous key).  Auto Key also keys frame 0
+-- with the old value when the first key is elsewhere: that key is removed again (the game holds
+-- the first key's value before it, and keys can start before frame 0 - salon's at frame -30).
+fn PTASE_KeyNode sc node posLit rotLit sclLit =
+(
+    local pc = node.position.controller, rc = node.rotation.controller, scl = node.scale.controller
+    local pos = PTASE_Exec sc posLit, rot = PTASE_Exec sc rotLit, sca = PTASE_Exec sc sclLit
+    if pos.count > 0 do pc.value = pos[1][2]
+    if rot.count > 0 do rc.value = rot[1][2] as quat
+    if sca.count > 0 do scl.value = sca[1][2]
+    fn dropFrame0 c keys =
+    (
+        if keys.count == 0 or (for k in keys where (k[1] as time) == 0f collect k).count > 0 do return ok
+        local i = getKeyIndex c 0f
+        if i > 0 do deleteKey c i
+    )
+    with animate on
+    (
+        for k in pos do at time k[1] pc.value = k[2]
+        local prev = undefined
+        for k in rot do
+        (
+            -- each key on the same side as the previous one: a linear rotation controller turns
+            -- the way the quaternions say, the long way round when the signs flip
+            local q = k[2] as quat
+            if prev != undefined and (q.x * prev.x + q.y * prev.y + q.z * prev.z + q.w * prev.w) < 0 do
+                q = quat -q.x -q.y -q.z -q.w
+            at time k[1] rc.value = q
+            prev = q
+        )
+        for k in sca do at time k[1] scl.value = k[2]
+    )
+    dropFrame0 pc pos
+    dropFrame0 rc rot
+    dropFrame0 scl sca
 )
 
 fn PTASE_Animate sc bones =
@@ -235,23 +328,46 @@ fn PTASE_Animate sc bones =
     local total = 0
     for i = 0 to rig.Count - 1 do total += rig.BoneKeyCount i
     if total == 0 do return 0
+    frameRate = 30                                     -- the game: 30 frames a second, 160 ticks a frame
     local done = 0
-    with animate on
+    for i = 0 to rig.Count - 1 while not PTASE_Cancelled do
     (
-        for i = 0 to rig.Count - 1 while not PTASE_Cancelled do
-        (
-            local n = rig.BoneKeyCount i
-            if n == 0 do continue
-            local b = bones[i + 1]
-            local pc = b.position.controller, rc = b.rotation.controller, scl = b.scale.controller
-            for k in (PTASE_Exec sc (rig.PosKeys i)) do at time k[1] pc.value = k[2]
-            for k in (PTASE_Exec sc (rig.RotKeys i)) do at time k[1] rc.value = (k[2] as quat)
-            for k in (PTASE_Exec sc (rig.ScaleKeys i)) do at time k[1] scl.value = k[2]
-            done += n
-            PTASE_Step (done as float / total)
-        )
+        local n = rig.BoneKeyCount i
+        if n == 0 do continue
+        PTASE_KeyNode sc bones[i + 1] (rig.PosKeys i) (rig.RotKeys i) (rig.ScaleKeys i)
+        -- no scale keys: the game applies no scale, so a mirrored bind pose (omuD's Bip-13) does
+        -- not mirror the animated bone
+        if (rig.ScaleKeys i) == "#()" do bones[i + 1].scale.controller.value = [1, 1, 1]
+        done += n
+        PTASE_Step (done as float / total)
+    )
+    -- bones without keys: the game shows them at their stored local transform
+    for i in (execute (rig.ParentsFirst())) do
+    (
+        local s = rig.BoneStatic (i - 1)
+        local b = bones[i]
+        if s != "" do at time 0 b.transform = (if b.parent != undefined then (execute s) * b.parent.transform else execute s)
     )
     total
+)
+
+-- map props with their own keys (windmills, doors): linear keys relative to the parent object
+fn PTASE_AnimateProps sc items =
+(
+    if items.count == 0 do return 0
+    frameRate = 30
+    for e in items do
+    (
+        local n = e[1], d = sc.GetObject e[2]
+        -- for the exporter: the pivot the keys turn about, exactly as written
+        setUserProp n "pt_rest" d.RestRows
+        n.position.controller = Linear_Position()
+        n.rotation.controller = Linear_Rotation()
+        n.scale.controller = Linear_Scale()
+        PTASE_KeyNode sc n d.PosKeys d.RotKeys d.ScaleKeys
+    )
+    if sc.LastFrame > animationRange.end.frame do animationRange = interval 0 sc.LastFrame
+    items.count
 )
 
 fn PTASE_SetMotions sc =
@@ -327,6 +443,7 @@ fn PTASE_ImportFile path opts:PTASE_Opts quiet:true =
     local doRig = sc.HasRig and (opts.count < 9 or opts[9])
     local rigBones = #()
     local skinned = #()
+    local animatedProps = #()
     with redraw off
     (
         undo off
@@ -365,6 +482,10 @@ fn PTASE_ImportFile path opts:PTASE_Opts quiet:true =
                     local isSkin = doRig and d.Phys != ""
                     append nodes #(n, (if isSkin then "" else d.Parent))
                     if isSkin do append skinned #(n, i)
+                    -- for the exporter: the parent the file gave it (often a bone)
+                    if isSkin and d.Parent != "" do setUserProp n "pt_parent" d.Parent
+                    if d.KeyCount > 0 and d.Kind == "geom" and not isSkin do append animatedProps #(n, i)
+                    if d.PhysEmpty do setUserProp n "pt_physique" "empty"
                     byName[d.Name] = n
                 )
             )
@@ -377,7 +498,9 @@ fn PTASE_ImportFile path opts:PTASE_Opts quiet:true =
             (
                 PTASE_ProgLo = lo + (hi - lo) * geomEnd
                 PTASE_ProgHi = lo + (hi - lo) * (geomEnd + 0.05)
-                for s in skinned do PTASE_Skin s[1] sc s[2] rigBones
+                local bound = PTASE_BindPose sc rigBones written:true
+                PTASE_SkinAll skinned sc rigBones
+                if bound do PTASE_BindPose sc rigBones written:false
                 PTASE_ProgLo = lo + (hi - lo) * (geomEnd + 0.05)
                 PTASE_ProgHi = hi
                 PTASE_Animate sc rigBones
@@ -389,6 +512,7 @@ fn PTASE_ImportFile path opts:PTASE_Opts quiet:true =
                 )
                 for b in rigBones do append nodes #(b, "")
             )
+            if not PTASE_Cancelled do PTASE_AnimateProps sc animatedProps
             if root != undefined do root.scale = [opts[6], opts[6], opts[6]]
         )
     )

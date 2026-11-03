@@ -29,9 +29,23 @@ from mathutils import Matrix, Quaternion, Vector
 from .aseparse import parse_ase, find, find_all, val, unquote
 
 TICKS = 160.0
+# animation key lines the game's ASE reader accepts (smRead3d.cpp)
+POS_KEYS = ('*CONTROL_POS_SAMPLE', '*CONTROL_TCB_POS_KEY', '*CONTROL_BEZIER_POS_KEY')
+ROT_KEYS = ('*CONTROL_ROT_SAMPLE', '*CONTROL_TCB_ROT_KEY')
+SCALE_KEYS = ('*CONTROL_SCALE_SAMPLE', '*CONTROL_TCB_SCALE_KEY', '*CONTROL_BEZIER_SCALE_KEY')
 # Blender bones point along their local Y axis, Biped bones along local X.
 AXIS = Matrix(((0.0, 1.0, 0.0, 0.0), (-1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 1.0, 0.0), (0.0, 0.0, 0.0, 1.0)))
 AXIS_INV = AXIS.inverted()
+# A bone pointing (nearly) along -Y: Blender's bone roll is ill-conditioned there, and far from the
+# origin, where head and tail are coarse 32-bit floats, Bip helpers of map props came out 13
+# degrees off.  Such bones point the other way (Blender Y = -3ds Max X); see bone_axes().
+AXIS_FLIP = AXIS @ Matrix.Diagonal((-1.0, -1.0, 1.0, 1.0))
+
+
+def bone_axes(arm_ob):
+    """{bone: 3ds Max bone axes -> Blender bone axes} (AXIS, or AXIS_FLIP for the flipped bones)."""
+    flipped = set(json.loads(arm_ob.get('pt_axis_flip', '[]'))) if arm_ob is not None else set()
+    return {b.name: (AXIS_FLIP if b.name in flipped else AXIS) for b in arm_ob.data.bones} if arm_ob else {}
 
 
 def _floats(s):
@@ -86,15 +100,33 @@ def physique(node):
     ph = find(node, '*PHYSIQUE')
     if ph is None:
         return None
+    # as the game's ASE reader (smRead3d.cpp): line by line at any depth (3ds Max nests them in
+    # *PHYSIQUE_VERTEXASSIGNMENT_LIST); a blended vertex takes the node listed first (number 0)
     out = {}
-    for c in ph[2] or ():
-        if c[0].startswith('*PHYSIQUE_VERTEXASSIGNMENT_NONBLENDED'):
-            p = c[1].split(None, 1)
-            if len(p) == 2:
-                out[int(p[0])] = p[1].strip().strip('"')
-        elif c[0] == '*PHYSIQUE_VERTEXASSIGNMENT_BLENDED_RIGIDTYPE':
-            # blended blocks: take the heaviest bone (PT itself is rigid only)
-            pass
+    blended = [None]
+
+    def walk(n):
+        for c in n[2] or ():
+            key = c[0]
+            if key == '*PHYSIQUE_VERTEXASSIGNMENT_NONBLENDED_RIGIDTYPE':
+                p = c[1].split(None, 1)
+                if len(p) == 2:
+                    try:
+                        out[int(p[0])] = p[1].strip().strip('"')
+                    except ValueError:
+                        pass
+            elif key == '*PHYSIQUE_VERTEXASSIGNMENT_BLENDED_RIGIDTYPE':
+                try:
+                    blended[0] = int(c[1].split()[0])
+                except (ValueError, IndexError):
+                    blended[0] = None
+            elif key == '*PHYSIQUE_VERTEXASSIGNMENT_NODE' and blended[0] is not None:
+                p = c[1].split(None, 2)
+                if len(p) == 3 and p[0] == '0':
+                    out[blended[0]] = p[2].strip().strip('"')
+            if c[2]:
+                walk(c)
+    walk(ph)
     return out
 
 
@@ -237,6 +269,12 @@ def build_armature(context, coll, name, bones, root_empty, bind_override=None):
         cap = max(1.0, 0.12 * max(hi[i] - lo[i] for i in range(3)))
         for nm in names:
             length[nm] = min(length[nm], cap)
+    # Blender keeps head and tail in 32-bit floats: a bone's direction is good to a float step of
+    # its position (0.004 at the 40000 of a map prop) over its length, so far from the origin
+    # bones are made long enough for 0.0003 rad
+    for nm in names:
+        length[nm] = max(length[nm], 5e-4 * max(abs(heads[nm][i]) for i in range(3)))
+    flipped = [nm for nm in names if world[nm].col[0].xyz.normalized().y < -0.99]
 
     prev_active = context.view_layer.objects.active
     context.view_layer.objects.active = ob
@@ -247,7 +285,7 @@ def build_armature(context, coll, name, bones, root_empty, bind_override=None):
         eb = ebs.new(nm)
         eb.head = (0.0, 0.0, 0.0)
         eb.tail = (0.0, length[nm], 0.0)
-        eb.matrix = world[nm] @ AXIS
+        eb.matrix = world[nm] @ (AXIS_FLIP if nm in flipped else AXIS)
     for nm in names:
         p = parent[nm]
         if p in world:
@@ -257,6 +295,7 @@ def build_armature(context, coll, name, bones, root_empty, bind_override=None):
     ob.select_set(False)
     context.view_layer.objects.active = prev_active
     ob['pt_bind'] = json.dumps({nm: [list(r) for r in world[nm]] for nm in names})
+    ob['pt_axis_flip'] = json.dumps(sorted(flipped))
     # the rest pose exactly as written in the file, so an untouched bone exports back unchanged
     raw = {}
     own_raw = {_name(n): _rows12(n) for n in bones}
@@ -287,6 +326,7 @@ def skin_mesh(mesh_ob, arm_ob, assign):
     mod.object = arm_ob
     mod.use_vertex_groups = True
     mod.use_deform_preserve_volume = False
+    return assign
 
 
 # --------------------------------------------------------------------------- animation
@@ -333,30 +373,46 @@ class Track(object):
         self.pos = []
         self.rot = []
         self.scl = []
+        # what the game uses for a channel without keys (smRead3d.cpp): TM_POS / TM_ROTAXIS +
+        # TM_ROTANGLE, which 3ds Max writes relative to the parent (the rows are world space,
+        # rounded: a helper scaled to 0.017 is far off there).  Taken when the file has them that
+        # way (a root node, or TM_POS away from TM_ROW3); see static().
+        self._static = None
+        tm = find(node, '*NODE_TM')
+        if tm is not None and val(tm, '*TM_POS') is not None and val(tm, '*TM_ROTANGLE') is not None:
+            tp = (_floats(val(tm, '*TM_POS', '0 0 0')) + [0.0] * 3)[:3]
+            r3 = (_floats(val(tm, '*TM_ROW3', '0 0 0')) + [0.0] * 3)[:3]
+            if not _parent(node) or max(abs(tp[i] - r3[i]) for i in range(3)) > 0.01:
+                ax = (_floats(val(tm, '*TM_ROTAXIS', '0 0 1')) + [0.0] * 3)[:3]
+                ang = (_floats(val(tm, '*TM_ROTANGLE', '0')) + [0.0])[0]
+                self._static = (Vector(tp), Quaternion(_qnorm(_qaxis(_unit(ax), -ang))))
         if a is None:
             return
+        # The keys the game's own ASE reader takes (smRead3d.cpp), whatever block they sit in:
+        # sampled keys and 3ds Max TCB / Bezier keys alike, first 4 or 5 numbers (no tangents).
+        q = (1.0, 0.0, 0.0, 0.0)
         for blk in a[2] or ():
-            tag = blk[0]
-            if tag == '*CONTROL_POS_TRACK':
-                for c in blk[2] or ():
+            for c in blk[2] or ():
+                tag = c[0]
+                if tag in POS_KEYS:
                     f = _floats(c[1])
                     if len(f) >= 4:
                         self.pos.append((f[0], Vector(f[1:4])))
-            elif tag == '*CONTROL_ROT_TRACK':
-                # Each sample turns the previous orientation by `angle` about `axis`
-                # (3ds Max rotates clockwise, hence the minus).  In between two keys
-                # the turn is applied proportionally - it can exceed 180 degrees.
-                # Accumulated in Python doubles: mathutils is 32-bit and a class
-                # skeleton chains ~10000 deltas.
-                q = (1.0, 0.0, 0.0, 0.0)
-                for c in blk[2] or ():
+                elif tag in ROT_KEYS:
+                    # Each key turns the previous orientation by `angle` about `axis`
+                    # (3ds Max rotates clockwise, hence the minus).  In between two keys
+                    # the game blends towards the key's turn (a slerp from a zero
+                    # quaternion, smObj3d GetRotFrame), i.e. the short way round: a turn of
+                    # 5.94 rad about -z (as 3ds Max writes a windmill) is 0.34 about +z.
+                    # Accumulated in Python doubles: mathutils is 32-bit and a class
+                    # skeleton chains ~10000 deltas.
                     f = _floats(c[1])
                     if len(f) >= 5:
                         axis = _unit(f[1:4])
-                        q = _qnorm(_qmul(_qaxis(axis, -f[4]), q))
-                        self.rot.append((f[0], q, axis, -f[4]))
-            elif tag == '*CONTROL_SCALE_TRACK':
-                for c in blk[2] or ():
+                        ang = -math.remainder(f[4], 2.0 * math.pi)
+                        q = _qnorm(_qmul(_qaxis(axis, ang), q))
+                        self.rot.append((f[0], q, axis, ang))
+                elif tag in SCALE_KEYS:
                     f = _floats(c[1])
                     if len(f) >= 4:
                         self.scl.append((f[0], Vector(f[1:4])))
@@ -367,13 +423,14 @@ class Track(object):
     def ticks(self, max_step=0.15):
         """Key times, plus in-between samples wherever one key turns more than
         `max_step` radians, so Blender's linear quaternion keys follow the
-        game's turn exactly (also turns of more than 180 degrees)."""
+        game's turn exactly."""
         ts = set(k[0] for k in self.pos) | set(k[0] for k in self.rot) | set(k[0] for k in self.scl)
         for i in range(1, len(self.rot)):
             t0, t1, ang = self.rot[i - 1][0], self.rot[i][0], abs(self.rot[i][3])
             if ang > max_step and t1 - t0 > 1:
-                n = int(math.ceil(ang / max_step))
-                ts.update(t0 + (t1 - t0) * j / float(n) for j in range(1, n))
+                n = int(min(math.ceil(ang / max_step), t1 - t0))
+                # whole ticks: the exporter writes key times as ticks (a fast root moves ~0.08 a tick)
+                ts.update(float(round(t0 + (t1 - t0) * j / float(n))) for j in range(1, n))
         return sorted(ts)
 
     def rotation(self, t):
@@ -402,6 +459,16 @@ class Track(object):
             return b
         return lerp(a, b, (t - t0) / (t1 - t0))
 
+    def static(self, rest):
+        """(location, rotation) the game shows on channels without keys; rest = the local
+        transform from the rows (used when the file has no parent-relative TM_POS / TM_ROTAXIS,
+        and always for a mirrored node)."""
+        loc, rot, _s = rest.decompose()
+        rot.normalize()
+        if self._static is not None and rest.to_3x3().determinant() > 0:
+            return self._static[0].copy(), self._static[1].copy()
+        return loc, rot
+
     def local(self, t, rest_loc, rest_rot, rest_scl):
         p = self._at(self.pos, self._pt, t, lambda a, b, f: a.lerp(b, f)) if self.pos else rest_loc
         r = self.rotation(t) if self.rot else rest_rot
@@ -422,19 +489,110 @@ def _channelbag(ob, action):
     return action                                   # Blender < 4.4: legacy action.fcurves
 
 
+def raw_worlds(arm_ob):
+    """{bone: bind world matrix exactly as written in the file (may be scaled / skewed)}."""
+    out = {}
+    for nm, f in json.loads(arm_ob.get('pt_bind_raw', '{}')).items():
+        if len(f) >= 12 and all(math.isfinite(x) for x in f):
+            out[nm] = Matrix(((f[0], f[3], f[6], f[9]), (f[1], f[4], f[7], f[10]),
+                              (f[2], f[5], f[8], f[11]), (0.0, 0.0, 0.0, 1.0)))
+    return out
+
+
+def bind_maps(rigid, raw):
+    """{bone: A = rigid rest @ written bind^-1} (armature space).
+
+    The game skins a vertex on its bone's bind pose as written, which can be scaled or skewed
+    (bones at 0.89 in many monsters, 8.8 fixed-point noise in all); Blender binds on the rigid
+    rest pose.  With every skinned vertex moved once by A, Blender's skinning gives exactly the
+    game's result at every frame:  bone world @ rest^-1 @ A @ v = bone world @ bind^-1 @ v.
+    The exporter applies A^-1 to get the written bind-pose vertices back.  Bones whose two
+    matrices agree are left out."""
+    out = {}
+    for nm, R in rigid.items():
+        W = raw.get(nm)
+        if W is None or abs(W.to_3x3().determinant()) < 1e-9:
+            continue
+        a = mul4(dbl4(R), inv4(dbl4(W)))                  # doubles: rigs can sit at map coordinates
+        if any(abs(a[i][j] - (1.0 if i == j else 0.0)) > 1e-7 for i in range(3) for j in range(4)):
+            out[nm] = a
+    return out
+
+
+def dbl4(m):
+    """A mathutils Matrix (column-vector, 4x4) as nested Python doubles."""
+    return [[float(m[i][j]) for j in range(4)] for i in range(4)]
+
+
+def mul4(a, b):
+    return [[a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j] + a[i][3] * b[3][j] for j in range(4)]
+            for i in range(4)]
+
+
+def inv4(m):
+    """Inverse of an affine 4x4 (last row 0 0 0 1), in doubles."""
+    a, b, c = m[0][0], m[0][1], m[0][2]
+    d, e, f = m[1][0], m[1][1], m[1][2]
+    g, h, i = m[2][0], m[2][1], m[2][2]
+    A, B, C = e * i - f * h, -(d * i - f * g), d * h - e * g
+    det = a * A + b * B + c * C
+    if abs(det) < 1e-300:
+        return [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+    r = [[A / det, -(b * i - c * h) / det, (b * f - c * e) / det],
+         [B / det, (a * i - c * g) / det, -(a * f - c * d) / det],
+         [C / det, -(a * h - b * g) / det, (a * e - b * d) / det]]
+    t = [m[0][3], m[1][3], m[2][3]]
+    out = [r[k] + [-(r[k][0] * t[0] + r[k][1] * t[1] + r[k][2] * t[2])] for k in range(3)]
+    return out + [[0.0, 0.0, 0.0, 1.0]]
+
+
+def apply_bind_maps(mesh_ob, assign, maps, mesh_world, inverse=False):
+    """Move every skinned vertex by its bone's bind map (or back, inverse=True).  mesh_world:
+    the mesh's pivot as nested doubles (armature space); coordinates stay in mesh space."""
+    if not maps:
+        return 0
+    minv = inv4(mesh_world)
+    per = {}
+    for nm, a in maps.items():
+        per[nm] = mul4(minv, mul4(inv4(a) if inverse else a, mesh_world))
+    me = mesh_ob.data
+    co = [0.0] * (3 * len(me.vertices))
+    me.vertices.foreach_get('co', co)
+    moved = 0
+    for vi, bn in assign.items():
+        m = per.get(bn)
+        if m is None or vi * 3 + 2 >= len(co):
+            continue
+        x, y, z = co[vi * 3], co[vi * 3 + 1], co[vi * 3 + 2]
+        co[vi * 3] = m[0][0] * x + m[0][1] * y + m[0][2] * z + m[0][3]
+        co[vi * 3 + 1] = m[1][0] * x + m[1][1] * y + m[1][2] * z + m[1][3]
+        co[vi * 3 + 2] = m[2][0] * x + m[2][1] * y + m[2][2] * z + m[2][3]
+        moved += 1
+    me.vertices.foreach_set('co', co)
+    me.update()
+    return moved
+
+
 def build_action_steps(arm_ob, world, parent, tracks, name):
     """Generator (progress 0..1): keys every bone that has a track.
     Pose basis = (bind local)^-1 @ animated local, in Blender bone axes."""
     action = bpy.data.actions.new(name)
     bag = _channelbag(arm_ob, action)
     todo = [nm for nm in world if nm in tracks and tracks[nm].ticks()]
+    raw = raw_worlds(arm_ob)
+    axes = bone_axes(arm_ob)
     last = 0.0
     for k, nm in enumerate(todo):
         tr = tracks[nm]
         p = parent.get(nm)
         rest_local = (world[p].inverted() @ world[nm]) if p in world else world[nm]
         rest_inv = rest_local.inverted()
-        r_loc, r_rot, r_scl = rest_local.decompose()
+        # channels without keys: the game uses the bone's own stored local transform (TM_POS /
+        # TM_ROTAXIS, else the bind pose as written: Tm x parent->TmInvert), and no scale
+        rb = raw.get(nm, world[nm])
+        raw_local = (raw.get(p, world[p]).inverted_safe() @ rb) if p in world else rb
+        r_loc, r_rot = tr.static(raw_local)
+        r_scl = Vector((1.0, 1.0, 1.0))
         ticks = tr.ticks()
         last = max(last, ticks[-1])
         n = len(ticks)
@@ -443,7 +601,10 @@ def build_action_steps(arm_ob, world, parent, tracks, name):
         scl = [0.0] * (3 * n)
         prev = None
         for i, t in enumerate(ticks):
-            basis = AXIS_INV @ rest_inv @ tr.local(t, r_loc, r_rot, r_scl) @ AXIS
+            # the bone's world is exactly the game's (the skinned vertices carry the difference
+            # between the written bind pose and Blender's rigid rest pose, see bind_maps)
+            ax = axes.get(nm, AXIS)
+            basis = ax.inverted() @ rest_inv @ tr.local(t, r_loc, r_rot, r_scl) @ ax
             l, q, s = basis.decompose()
             if prev is not None and prev.dot(q) < 0.0:
                 q.negate()
@@ -474,6 +635,49 @@ def build_action_steps(arm_ob, world, parent, tracks, name):
                 fc.update()
         yield (k + 1) / float(len(todo) or 1)
     action['pt_last_frame'] = last / TICKS
+    return action
+
+
+def build_object_action(ob, track, rest_local, name):
+    """A rigid object's own *TM_ANIMATION (windmills, doors, chandeliers): linear location /
+    quaternion / scale keys on the object, relative to its parent object (whose transform is
+    its own ASE local transform, so object basis = ASE local)."""
+    action = bpy.data.actions.new(name)
+    bag = _channelbag(ob, action)
+    ob.rotation_mode = 'QUATERNION'
+    r_loc, r_rot, r_scl = rest_local.decompose()
+    if rest_local.to_3x3().determinant() > 0:
+        r_loc, r_rot = track.static(rest_local)        # channels without keys, as the game
+    ticks = track.ticks()
+    n = len(ticks)
+    loc = [0.0] * (3 * n)
+    rot = [0.0] * (4 * n)
+    scl = [0.0] * (3 * n)
+    prev = None
+    for i, t in enumerate(ticks):
+        l, q, s = track.local(t, r_loc, r_rot, r_scl).decompose()
+        if prev is not None and prev.dot(q) < 0.0:
+            q.negate()
+        prev = q
+        loc[3 * i:3 * i + 3] = l
+        rot[4 * i:4 * i + 4] = q
+        scl[3 * i:3 * i + 3] = s
+    frames = [t / TICKS for t in ticks]
+    for i in range(n - 2, -1, -1):                    # Blender merges keys closer than 0.01 frame
+        if frames[i + 1] - frames[i] < 0.02:
+            frames[i] = frames[i + 1] - 0.02
+    for path, data, width in (('location', loc, 3), ('rotation_quaternion', rot, 4), ('scale', scl, 3)):
+        for j in range(width):
+            fc = bag.fcurves.new(path, index=j)
+            kp = fc.keyframe_points
+            kp.add(n)
+            co = [0.0] * (2 * n)
+            co[0::2] = frames
+            co[1::2] = data[j::width]
+            kp.foreach_set('co', co)
+            kp.foreach_set('interpolation', [1] * n)      # LINEAR, like the game
+            fc.update()
+    action['pt_last_frame'] = ticks[-1] / TICKS if ticks else 0.0
     return action
 
 

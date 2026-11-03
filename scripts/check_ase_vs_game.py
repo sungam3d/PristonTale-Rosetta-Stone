@@ -26,13 +26,7 @@ for fr in frames:
     d = np.linalg.norm(a[:n] - g[:n], axis=1)
     print('frame %6.1f  vertices %d/%d  error median %.4f  max %.4f' % (fr, len(a), len(g), np.median(d), d.max()))
     # bone world: game vs ase
-    gw = {}
-    for b in skel.objects:
-        R, p = game_pose.bone_local(b, tick)
-        if b.parent in gw:
-            PR, Pp = gw[b.parent]
-            R, p = R @ PR, p @ PR + Pp
-        gw[b.name] = (R, p)
+    gw = game_pose.world_of(skel, tick)
     shown = 0
     for b in skel.objects:
         if b.name not in rig.bones:

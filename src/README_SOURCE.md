@@ -1,4 +1,4 @@
-# PT SMD → ASE: source code (v1.3.2)
+# PT SMD → ASE: source code (v1.3.3)
 
 Everything needed to rebuild the release:
 - the converter, in C# (shipped) and in Python (reference);
@@ -26,7 +26,7 @@ scripts\                     verification and probe scripts (see TECHNICAL.md)
 tools\
   build_blender_addon.py     builds tools\dist\pt_ase_importer.zip
   blender\io_scene_pt_ase\   Blender extension (ase_import.py, ase_anim.py, ase_export.py)
-  max\                       3ds Max: PT_ASE_Importer.ms, PT_ASE_Exporter.ms, PT_ASE_Reader.cs
+  max\                       3ds Max: PT_ASE_Importer.ms, PT_ASE_Exporter.ms, PT_ASE_Reader.cs, PT_ASE_Skin.cs
 ```
 
 ## Building
@@ -38,7 +38,7 @@ tools\
 | Blender add-on only | Python 3 | `python tools\build_blender_addon.py` |
 | Python converter | Python 3, no packages | `python char2ase.py <file or folder> -o out` |
 
-The 3ds Max scripts need no build step. `PT_ASE_Importer.ms` compiles `PT_ASE_Reader.cs` itself at load time.
+The 3ds Max scripts need no build step. `PT_ASE_Importer.ms` compiles `PT_ASE_Reader.cs` (and `PT_ASE_Skin.cs`, which reads Skin weights through the 3ds Max SDK) itself at load time.
 
 ## Checks used for this release
 

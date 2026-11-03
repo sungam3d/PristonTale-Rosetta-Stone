@@ -282,19 +282,41 @@ namespace PTAse
 
         static readonly char[] Blank = { ' ', '\t' };
 
-        static List<string> PhysNames(Node g)
+        // Bone name per vertex of a skinned mesh, as the game's ASE reader (smRead3d.cpp) takes it:
+        // line by line at any depth (3ds Max nests them in *PHYSIQUE_VERTEXASSIGNMENT_LIST); a
+        // blended vertex takes the node listed first (number 0).
+        public static Dictionary<int, string> PhysMap(Node g)
         {
-            List<string> r = new List<string>();
+            Dictionary<int, string> r = new Dictionary<int, string>();
             Node ph = g.Find("*PHYSIQUE");
-            if (ph != null && ph.Kids != null)
-                foreach (Node c in ph.Kids)
-                    if (c.Key.StartsWith("*PHYSIQUE_VERTEXASSIGNMENT_NONBLENDED"))
-                    {
-                        string a = c.Args.Trim();
-                        int sp = a.IndexOfAny(Blank);
-                        if (sp > 0) r.Add(U.Unq(a.Substring(sp + 1)));
-                    }
+            if (ph != null) PhysWalk(ph, r, new int[] { -1 });
             return r;
+        }
+        static void PhysWalk(Node n, Dictionary<int, string> r, int[] blended)
+        {
+            if (n.Kids == null) return;
+            foreach (Node c in n.Kids)
+            {
+                string a = c.Args.Trim();
+                if (c.Key == "*PHYSIQUE_VERTEXASSIGNMENT_NONBLENDED_RIGIDTYPE")
+                {
+                    int sp = a.IndexOfAny(Blank);
+                    int v;
+                    if (sp > 0 && int.TryParse(a.Substring(0, sp), NumberStyles.Integer, U.CI, out v)) r[v] = U.Unq(a.Substring(sp + 1));
+                }
+                else if (c.Key == "*PHYSIQUE_VERTEXASSIGNMENT_BLENDED_RIGIDTYPE")
+                {
+                    string[] p = U.Split(a);
+                    int v;
+                    blended[0] = p.Length > 0 && int.TryParse(p[0], NumberStyles.Integer, U.CI, out v) ? v : -1;
+                }
+                else if (c.Key == "*PHYSIQUE_VERTEXASSIGNMENT_NODE" && blended[0] >= 0)
+                {
+                    string[] p = a.Split(Blank, 3, StringSplitOptions.RemoveEmptyEntries);
+                    if (p.Length == 3 && p[0] == "0") r[blended[0]] = U.Unq(p[2]);
+                }
+                PhysWalk(c, r, blended);
+            }
         }
 
         public Rig(Node root, string path, bool animate, string picked)
@@ -305,7 +327,7 @@ namespace PTAse
             foreach (Node n in nodes)
             {
                 byName[Name(n)] = n;
-                foreach (string b in PhysNames(n)) used.Add(b);
+                foreach (string b in PhysMap(n).Values) used.Add(b);
             }
             HashSet<string> isBone = new HashSet<string>();
             foreach (Node n in nodes)
@@ -432,13 +454,29 @@ namespace PTAse
             }
             Node sceneN = animRoot.Find("*SCENE");
             if (sceneN != null) LastFrame = U.I(sceneN.Val("*SCENE_LASTFRAME", "0"));
+            Animated = true;
             foreach (Node n in Nodes(animRoot))
             {
                 int bi;
                 Node a = n.Find("*TM_ANIMATION");
                 if (a == null || !index.TryGetValue(Name(n), out bi)) continue;
-                Keys(Bones[bi], a);
+                Bone b = Bones[bi];
+                // channels without keys: the game uses the bone's own stored local transform
+                // (TM_POS / TM_ROTAXIS, else the bind pose as written) and no scale
+                Track t = ReadTrack(a, EngineStatic(n, RawLocal(b), U.Unq(n.Val("*NODE_PARENT", "")).Length > 0), false);
+                b.PosKeys = t.Pos; b.RotKeys = t.Rot; b.ScaleKeys = t.Scale; b.KeyCount = t.Count;
             }
+        }
+
+        public bool Animated;
+
+        // The bone's rest pose relative to its parent exactly as written (may be scaled / skewed)
+        double[] RawLocal(Bone b)
+        {
+            double[] w = b.Raw ?? b.Bind;
+            if (b.ParentIndex < 0) return w;
+            Bone p = Bones[b.ParentIndex];
+            return Mul43(w, Scene.Inverse(p.Raw ?? p.Bind));
         }
 
         // Rest pose of a bone: from the animation file when it has the bone, else the bone's own
@@ -458,7 +496,7 @@ namespace PTAse
         }
 
         // 4x3 row-vector transforms (Max matrix3 layout: rows 0-2 rotation, row 3 translation)
-        static double[] Mul43(double[] a, double[] b)
+        internal static double[] Mul43(double[] a, double[] b)
         {
             double[] r = new double[12];
             for (int i = 0; i < 4; i++)
@@ -548,64 +586,143 @@ namespace PTAse
             return r;
         }
 
-        static string Vec3Keys(Node track)
+        // ---- keys of one node, as MAXScript literals for linear controllers (parent-relative)
+        public class Track
+        {
+            public string Pos = "#()", Rot = "#()", Scale = "#()";
+            public int Count;
+            public double LastTick;
+        }
+
+        static readonly string[] PosTags = { "*CONTROL_POS_SAMPLE", "*CONTROL_TCB_POS_KEY", "*CONTROL_BEZIER_POS_KEY" };
+        static readonly string[] RotTags = { "*CONTROL_ROT_SAMPLE", "*CONTROL_TCB_ROT_KEY" };
+        static readonly string[] ScaleTags = { "*CONTROL_SCALE_SAMPLE", "*CONTROL_TCB_SCALE_KEY", "*CONTROL_BEZIER_SCALE_KEY" };
+
+        static void KeyLines(Node n, List<double[]> pos, List<double[]> rot, List<double[]> scl)
+        {
+            if (n.Kids == null) return;
+            foreach (Node c in n.Kids)
+            {
+                if (Array.IndexOf(PosTags, c.Key) >= 0) pos.Add(U.Ds(c.Args, 4));
+                else if (Array.IndexOf(RotTags, c.Key) >= 0) rot.Add(U.Ds(c.Args, 5));
+                else if (Array.IndexOf(ScaleTags, c.Key) >= 0) scl.Add(U.Ds(c.Args, 4));
+                else KeyLines(c, pos, rot, scl);
+            }
+        }
+
+        // The keys the game's own ASE reader takes (smRead3d.cpp), whatever block they sit in:
+        // sampled keys and 3ds Max TCB / Bezier keys alike, first 4 or 5 numbers (no tangents).
+        // A channel without keys gets one key with `rest` (the node's own local transform, which
+        // the game uses there); its scale only when restScale (the game scales bones only by keys).
+        public static Track ReadTrack(Node anim, double[] rest, bool restScale)
+        {
+            List<double[]> pos = new List<double[]>(), rot = new List<double[]>(), scl = new List<double[]>();
+            KeyLines(anim, pos, rot, scl);
+            Track t = new Track();
+            if (pos.Count + rot.Count + scl.Count == 0) return t;
+            double first = double.MaxValue, last = 0;
+            foreach (List<double[]> l in new[] { pos, rot, scl })
+                if (l.Count > 0) { first = Math.Min(first, l[0][0]); last = Math.Max(last, l[l.Count - 1][0]); }
+            t.LastTick = last;
+            // rest = scale x rotation rows (det < 0: negative scale), translation
+            double[] sc = new double[3], R0 = new double[9];
+            double det = rest[0] * (rest[4] * rest[8] - rest[5] * rest[7]) - rest[1] * (rest[3] * rest[8] - rest[5] * rest[6])
+                       + rest[2] * (rest[3] * rest[7] - rest[4] * rest[6]);
+            double[] o = Ortho(det < 0 ? new double[] { -rest[0], -rest[1], -rest[2], -rest[3], -rest[4], -rest[5],
+                                                        -rest[6], -rest[7], -rest[8], 0, 0, 0 } : rest);
+            for (int i = 0; i < 3; i++)
+            {
+                sc[i] = Math.Sqrt(rest[i * 3] * rest[i * 3] + rest[i * 3 + 1] * rest[i * 3 + 1] + rest[i * 3 + 2] * rest[i * 3 + 2]);
+                if (det < 0) sc[i] = -sc[i];
+            }
+            Array.Copy(o, R0, 9);
+            if (pos.Count == 0) pos.Add(new double[] { first, rest[9], rest[10], rest[11] });
+            if (scl.Count == 0 && restScale) scl.Add(new double[] { first, sc[0], sc[1], sc[2] });
+            t.Pos = Vec3Keys(pos);
+            t.Scale = Vec3Keys(scl);
+            // absolute local rotation at every key (rows), accumulated in doubles: each key turns the
+            // previous orientation by its angle about its axis
+            StringBuilder sb = new StringBuilder("#(");
+            if (rot.Count == 0) RotKey(sb, first, R0);
+            else
+            {
+                double[] R = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+                for (int k = 0; k < rot.Count; k++)
+                {
+                    double[] f = rot[k];
+                    double l = Math.Sqrt(f[1] * f[1] + f[2] * f[2] + f[3] * f[3]);
+                    if (l > 1e-12) R = Mul3(R, AxisRows(f[1] / l, f[2] / l, f[3] / l, f[4]));
+                    if (k > 0) sb.Append(',');
+                    RotKey(sb, f[0], R);
+                }
+            }
+            t.Rot = sb.Append(')').ToString();
+            t.Count = pos.Count + Math.Max(1, rot.Count) + scl.Count;
+            return t;
+        }
+
+        // What the game uses for a channel without keys (smRead3d.cpp): *TM_POS and *TM_ROTAXIS /
+        // *TM_ROTANGLE, which 3ds Max writes relative to the parent (the rows are world space,
+        // rounded to 3-4 decimals: a helper scaled to 0.017 is far off there).  Used when the file
+        // has them that way (a root node, or TM_POS away from TM_ROW3) and the node is not mirrored;
+        // `rest` (the local transform from the rows) keeps its scale.
+        internal static double[] EngineStatic(Node g, double[] rest, bool hasParent)
+        {
+            Node tm = g.Find("*NODE_TM");
+            if (tm == null || tm.Find("*TM_POS") == null || tm.Find("*TM_ROTANGLE") == null) return rest;
+            double[] r3 = U.Ds(tm.Val("*TM_ROW3", "0 0 0"), 3), tp = U.Ds(tm.Val("*TM_POS", "0 0 0"), 3);
+            bool local = !hasParent || Math.Max(Math.Abs(tp[0] - r3[0]), Math.Max(Math.Abs(tp[1] - r3[1]), Math.Abs(tp[2] - r3[2]))) > 0.01;
+            double det = rest[0] * (rest[4] * rest[8] - rest[5] * rest[7]) - rest[1] * (rest[3] * rest[8] - rest[5] * rest[6])
+                       + rest[2] * (rest[3] * rest[7] - rest[4] * rest[6]);
+            if (!local || det <= 0) return rest;
+            double[] ax = U.Ds(tm.Val("*TM_ROTAXIS", "0 0 1"), 3);
+            double ang = U.D(tm.Val("*TM_ROTANGLE", "0"));
+            double l = Math.Sqrt(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
+            double[] R = l > 1e-9 ? AxisRows(ax[0] / l, ax[1] / l, ax[2] / l, ang) : new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+            double[] o = new double[12];
+            for (int i = 0; i < 3; i++)
+            {
+                double n = Math.Sqrt(rest[i * 3] * rest[i * 3] + rest[i * 3 + 1] * rest[i * 3 + 1] + rest[i * 3 + 2] * rest[i * 3 + 2]);
+                for (int j = 0; j < 3; j++) o[i * 3 + j] = n * R[i * 3 + j];
+            }
+            o[9] = tp[0]; o[10] = tp[1]; o[11] = tp[2];
+            return o;
+        }
+
+        static void RotKey(StringBuilder sb, double tick, double[] R)
+        {
+            sb.Append("#(").Append(G(tick / 160.0)).Append(",(matrix3 [").Append(G(R[0])).Append(',').Append(G(R[1])).Append(',')
+              .Append(G(R[2])).Append("] [").Append(G(R[3])).Append(',').Append(G(R[4])).Append(',').Append(G(R[5]))
+              .Append("] [").Append(G(R[6])).Append(',').Append(G(R[7])).Append(',').Append(G(R[8])).Append("] [0,0,0]))");
+        }
+
+        static string Vec3Keys(List<double[]> keys)
         {
             StringBuilder sb = new StringBuilder("#(");
-            int k = 0;
-            foreach (Node c in track.Kids)
+            for (int k = 0; k < keys.Count; k++)
             {
-                double[] f = U.Ds(c.Args, 4);
-                if (k++ > 0) sb.Append(',');
+                double[] f = keys[k];
+                if (k > 0) sb.Append(',');
                 sb.Append("#(").Append(G(f[0] / 160.0)).Append(",[").Append(G(f[1])).Append(',').Append(G(f[2]))
                   .Append(',').Append(G(f[3])).Append("])");
             }
             return sb.Append(')').ToString();
         }
-
-        void Keys(Bone b, Node anim)
-        {
-            Node pt = anim.Find("*CONTROL_POS_TRACK"), rt = anim.Find("*CONTROL_ROT_TRACK"), st = anim.Find("*CONTROL_SCALE_TRACK");
-            int n = 0;
-            if (pt != null && pt.Kids != null) { b.PosKeys = Vec3Keys(pt); n += pt.Kids.Count; }
-            if (st != null && st.Kids != null) { b.ScaleKeys = Vec3Keys(st); n += st.Kids.Count; }
-            if (rt != null && rt.Kids != null)
-            {
-                // absolute local rotation at every key (rows), accumulated in doubles
-                StringBuilder sb = new StringBuilder("#(");
-                double[] R = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
-                int k = 0;
-                foreach (Node c in rt.Kids)
-                {
-                    double[] f = U.Ds(c.Args, 5);
-                    double l = Math.Sqrt(f[1] * f[1] + f[2] * f[2] + f[3] * f[3]);
-                    if (l > 1e-12) R = Mul3(R, AxisRows(f[1] / l, f[2] / l, f[3] / l, f[4]));
-                    if (k++ > 0) sb.Append(',');
-                    sb.Append("#(").Append(G(f[0] / 160.0)).Append(",(matrix3 [").Append(G(R[0])).Append(',').Append(G(R[1])).Append(',')
-                      .Append(G(R[2])).Append("] [").Append(G(R[3])).Append(',').Append(G(R[4])).Append(',').Append(G(R[5]))
-                      .Append("] [").Append(G(R[6])).Append(',').Append(G(R[7])).Append(',').Append(G(R[8])).Append("] [0,0,0]))");
-                }
-                n += k;
-                b.RotKeys = sb.Append(')').ToString();
-            }
-            b.KeyCount = n;
-        }
         static string G(double v) { return Math.Abs(v) < 1e-12 ? "0.0" : v.ToString("0.0#########", U.CI); }
+        internal static string M3(double[] m)
+        {
+            return "(matrix3 [" + G(m[0]) + "," + G(m[1]) + "," + G(m[2]) + "] [" + G(m[3]) + "," + G(m[4]) + "," + G(m[5]) +
+                   "] [" + G(m[6]) + "," + G(m[7]) + "," + G(m[8]) + "] [" + G(m[9]) + "," + G(m[10]) + "," + G(m[11]) + "])";
+        }
 
         public string PhysiqueLiteral(Node g, int numVerts)
         {
             int[] idx = new int[numVerts];
-            Node ph = g.Find("*PHYSIQUE");
-            if (ph != null && ph.Kids != null)
-                foreach (Node c in ph.Kids)
-                {
-                    if (!c.Key.StartsWith("*PHYSIQUE_VERTEXASSIGNMENT_NONBLENDED")) continue;
-                    string a = c.Args.Trim();
-                    int sp = a.IndexOfAny(Blank);
-                    if (sp <= 0) continue;
-                    int v = U.I(a.Substring(0, sp));
-                    int bi;
-                    if (v >= 0 && v < numVerts && index.TryGetValue(U.Unq(a.Substring(sp + 1)), out bi)) idx[v] = bi + 1;
-                }
+            foreach (KeyValuePair<int, string> kv in PhysMap(g))
+            {
+                int bi;
+                if (kv.Key >= 0 && kv.Key < numVerts && index.TryGetValue(kv.Value, out bi)) idx[kv.Key] = bi + 1;
+            }
             StringBuilder sb = new StringBuilder("#(");
             for (int i = 0; i < numVerts; i++) { if (i > 0) sb.Append(','); sb.Append(idx[i]); }
             return sb.Append(')').ToString();
@@ -625,11 +742,63 @@ namespace PTAse
             for (int k = 0; k < 12; k++) { if (k > 0) sb.Append(' '); sb.Append(m[k].ToString("R", U.CI)); }
             return sb.ToString();
         }
-        public string BoneTm(int i)
+        public string BoneTm(int i) { return M3(Bones[i].Bind); }
+
+        // a bone's bind pose as written (null = no such bone)
+        internal double[] RawOf(string name)
         {
-            double[] m = Bones[i].Bind;
-            return "(matrix3 [" + G(m[0]) + "," + G(m[1]) + "," + G(m[2]) + "] [" + G(m[3]) + "," + G(m[4]) + "," + G(m[5]) +
-                   "] [" + G(m[6]) + "," + G(m[7]) + "," + G(m[8]) + "] [" + G(m[9]) + "," + G(m[10]) + "," + G(m[11]) + "])";
+            int i;
+            return index.TryGetValue(name ?? "", out i) ? (Bones[i].Raw ?? Bones[i].Bind) : null;
+        }
+
+        // 1-based bone indices, parents before their children
+        public string ParentsFirst()
+        {
+            List<int> order = new List<int>();
+            bool[] done = new bool[Bones.Count];
+            for (int i = 0; i < Bones.Count; i++) AddUp(i, done, order, 0);
+            StringBuilder sb = new StringBuilder("#(");
+            for (int k = 0; k < order.Count; k++) { if (k > 0) sb.Append(','); sb.Append(order[k] + 1); }
+            return sb.Append(')').ToString();
+        }
+        void AddUp(int i, bool[] done, List<int> order, int depth)
+        {
+            if (done[i]) return;
+            done[i] = true;                                  // (set first: a parent loop cannot recurse forever)
+            int p = Bones[i].ParentIndex;
+            if (p >= 0 && depth < 1000) AddUp(p, done, order, depth + 1);
+            order.Add(i);
+        }
+
+        // The bind pose exactly as written (scaled / skewed): the game skins a vertex on it, so the
+        // Skin modifier is bound with the bones there.  "" = same as the rigid rest pose.
+        public string BoneBindTm(int i)
+        {
+            Bone b = Bones[i];
+            double[] w = b.Raw;
+            if (!Animated || w == null || !Usable(w)) return "";
+            for (int k = 0; k < 12; k++) if (Math.Abs(w[k] - b.Bind[k]) > 1e-7) return M3(w);
+            return "";
+        }
+
+        // A bone without keys in an animated skeleton: the game shows it at its stored local
+        // transform (Tm x parent->TmInvert, scale and all).  "" = no keys needed beyond the rest pose.
+        public string BoneStatic(int i)
+        {
+            Bone b = Bones[i];
+            if (!Animated || b.KeyCount > 0 || b.Raw == null) return "";
+            double[] raw = RawLocal(b);
+            if (!Usable(raw)) return "";
+            double[] rest = b.ParentIndex >= 0 ? Mul43(b.Bind, Inv43(Bones[b.ParentIndex].Bind)) : b.Bind;
+            for (int k = 0; k < 12; k++) if (Math.Abs(raw[k] - rest[k]) > 1e-6) return M3(raw);
+            return "";
+        }
+
+        internal static bool Usable(double[] m)
+        {
+            foreach (double v in m) if (double.IsNaN(v) || double.IsInfinity(v)) return false;
+            double det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
+            return Math.Abs(det) > 1e-9;
         }
         public string PosKeys(int i) { return Bones[i].PosKeys; }
         public string RotKeys(int i) { return Bones[i].RotKeys; }
@@ -676,10 +845,13 @@ namespace PTAse
         {
             double[] r = { a0, a1, a2, b0, b1, b2, c0, c1, c2 };
             double[] sc = new double[3];
+            // mirrored (a prop with a negative scale): negative scale, the rotation rows turned back
+            double det = a0 * (b1 * c2 - b2 * c1) - a1 * (b0 * c2 - b2 * c0) + a2 * (b0 * c1 - b1 * c0);
             for (int i = 0; i < 3; i++)
             {
                 sc[i] = Math.Sqrt(r[i * 3] * r[i * 3] + r[i * 3 + 1] * r[i * 3 + 1] + r[i * 3 + 2] * r[i * 3 + 2]);
-                if (sc[i] > 1e-12) for (int j = 0; j < 3; j++) r[i * 3 + j] /= sc[i];
+                if (det < 0) sc[i] = -sc[i];
+                if (Math.Abs(sc[i]) > 1e-12) for (int j = 0; j < 3; j++) r[i * 3 + j] /= sc[i];
             }
             pos.Append("\t\t\t*CONTROL_POS_SAMPLE ").Append(tick.ToString(CI)).Append('\t').Append(F6(t0)).Append('\t')
                .Append(F6(t1)).Append('\t').Append(F6(t2)).Append("\r\n");
@@ -765,15 +937,22 @@ namespace PTAse
                  .Append(" B: ").Append(f[i][1].ToString(CI).PadLeft(5)).Append(" C: ").Append(f[i][2].ToString(CI).PadLeft(5))
                  .Append(" AB:    1 BC:    1 CA:    1\t *MESH_SMOOTHING 1 \t*MESH_MTLID 0\r\n");
             o.Append("\t\t}\r\n\t\t*MESH_NUMTVERTEX 0\r\n\t}\r\n\t*PROP_MOTIONBLUR 0\r\n\t*PROP_CASTSHADOW 1\r\n\t*PROP_RECVSHADOW 1\r\n");
-            if (withTrack && pos != null && pos.Length > 0)
-            {
-                o.Append("\t*TM_ANIMATION {\r\n\t\t*NODE_NAME ").Append(Q(name)).Append("\r\n");
-                o.Append("\t\t*CONTROL_POS_TRACK {\r\n").Append(pos).Append("\t\t}\r\n");
-                o.Append("\t\t*CONTROL_ROT_TRACK {\r\n").Append(rot).Append("\t\t}\r\n");
-                if (hasScale) o.Append("\t\t*CONTROL_SCALE_TRACK {\r\n").Append(scl).Append("\t\t}\r\n");
-                o.Append("\t}\r\n");
-            }
+            if (withTrack) o.Append(Track(name));
             o.Append("\t*WIREFRAME_COLOR 0.6510\t0.7922\t0.9412\r\n}\r\n");
+            pos = null;
+            return o.ToString();
+        }
+
+        // The *TM_ANIMATION block of the keys given since BeginTrack ("" = none)
+        public string Track(string name)
+        {
+            if (pos == null || pos.Length == 0) return "";
+            StringBuilder o = new StringBuilder();
+            o.Append("\t*TM_ANIMATION {\r\n\t\t*NODE_NAME ").Append(Q(name)).Append("\r\n");
+            o.Append("\t\t*CONTROL_POS_TRACK {\r\n").Append(pos).Append("\t\t}\r\n");
+            o.Append("\t\t*CONTROL_ROT_TRACK {\r\n").Append(rot).Append("\t\t}\r\n");
+            if (hasScale) o.Append("\t\t*CONTROL_SCALE_TRACK {\r\n").Append(scl).Append("\t\t}\r\n");
+            o.Append("\t}\r\n");
             pos = null;
             return o.ToString();
         }
@@ -794,6 +973,29 @@ namespace PTAse
         }
     }
 
+    // Textures the importer decoded into %TEMP%\pt_texture_cache as <hash>_<name>: the exporter
+    // writes (and copies) the game's own file instead of the temporary copy.
+    public class TexInfo
+    {
+        public string Original(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            try
+            {
+                string dir = Path.GetDirectoryName(path) ?? "", nm = Path.GetFileName(path);
+                if (!dir.EndsWith("pt_texture_cache", StringComparison.OrdinalIgnoreCase) || nm.Length < 10 || nm[8] != '_') return path;
+                string src = path + ".src";
+                if (File.Exists(src))
+                {
+                    string o = File.ReadAllText(src).Trim();
+                    if (o.Length > 0) return o;
+                }
+                return nm.Substring(9);
+            }
+            catch (Exception) { return path; }
+        }
+    }
+
     public class GeomData
     {
         public string Name = "", Parent = "", Kind = "geom";
@@ -805,9 +1007,16 @@ namespace PTAse
         public string[] ChanFaces = new string[0];
         public int MaterialRef = -1;
         public int[] UsedMtlIds = new int[0];
+        internal List<int> FaceMtl = new List<int>();     // MESH_MTLID per face, as written
         public bool AllCollision;
         // skinned mesh: 1-based bone index per vertex (0 = no bone), as a MAXScript array literal
         public string Phys = "";
+        // a prop's own animation (windmills, doors): linear keys relative to the parent object
+        public string PosKeys = "#()", RotKeys = "#()", ScaleKeys = "#()";
+        public int KeyCount;
+        public double LastTick;
+        public string RestRows = "";              // its NODE_TM exactly as written (12 numbers), for the exporter
+        public bool PhysEmpty;                    // a *PHYSIQUE without assignments (the exporter keeps it)
         // light
         public string LightColor = "(color 255 255 255)";
         public double LightRange = 200;
@@ -829,6 +1038,7 @@ namespace PTAse
         {
             Scene t = Load(path, Animate, AnimationFile);
             FileName = t.FileName; Materials = t.Materials; Objects = t.Objects; LastFrame = t.LastFrame; Rig = t.Rig;
+            packed = t.packed;
         }
         public string ChannelList(int obj)
         {
@@ -884,20 +1094,98 @@ namespace PTAse
             List<Node> geoms = new List<Node>();
             Collect(root, geoms);
             HashSet<string> boneNames = new HashSet<string>();
-            if (Rig.IsCharacter(root))
+            bool isChar = Rig.IsCharacter(root);
+            if (isChar)
             {
                 sc.Rig = new Rig(root, path, animate, animationFile);
                 foreach (Rig.Bone b in sc.Rig.Bones) boneNames.Add(b.Name);
             }
+            // objects with their own animation (map props: windmills, doors; rigid parts of a
+            // character riding on a bone: Deius' Circle001): those objects and their parents (bones
+            // aside) keep their exact NODE_TM pivot (the keys turn about it)
+            Dictionary<string, double[]> rawTm = new Dictionary<string, double[]>();
+            HashSet<string> rawNames = new HashSet<string>();
+            Dictionary<string, string> parentOf = new Dictionary<string, string>();
             foreach (Node g in geoms)
             {
-                if (boneNames.Contains(U.Unq(g.Val("*NODE_NAME", "")))) continue;     // bones become helpers
-                GeomData d = g.Key == "*GEOMOBJECT" ? BuildGeom(g, sc) : BuildLight(g);
+                string nm = U.Unq(g.Val("*NODE_NAME", ""));
+                if (parentOf.ContainsKey(nm)) continue;
+                parentOf[nm] = U.Unq(g.Val("*NODE_PARENT", ""));
+                rawTm[nm] = Tm(g);
+            }
+            foreach (Node g in geoms)
+            {
+                if (g.Find("*TM_ANIMATION") == null || Rig.PhysMap(g).Count > 0) continue;
+                string nm = U.Unq(g.Val("*NODE_NAME", ""));
+                while (nm.Length > 0 && !rawNames.Contains(nm) && !boneNames.Contains(nm) && parentOf.ContainsKey(nm))
+                {
+                    rawNames.Add(nm);
+                    nm = parentOf[nm];
+                }
+            }
+            foreach (Node g in geoms)
+            {
+                string nm = U.Unq(g.Val("*NODE_NAME", ""));
+                if (boneNames.Contains(nm)) continue;     // bones become helpers
+                bool raw = rawNames.Contains(nm) && Rig.Usable(Tm(g));
+                GeomData d = g.Key == "*GEOMOBJECT" ? BuildGeom(g, sc, raw) : BuildLight(g);
                 if (d == null) continue;
-                if (sc.Rig != null && g.Find("*PHYSIQUE") != null) d.Phys = sc.Rig.PhysiqueLiteral(g, d.NumVerts);
+                // skinned: at least one vertex on a bone (an empty *PHYSIQUE is a rigid part)
+                if (sc.Rig != null && g.Find("*PHYSIQUE") != null)
+                {
+                    if (Rig.PhysMap(g).Count > 0) d.Phys = sc.Rig.PhysiqueLiteral(g, d.NumVerts);
+                    else d.PhysEmpty = true;
+                }
+                Node anim = g.Find("*TM_ANIMATION");
+                if (raw && anim != null && d.Kind == "geom")
+                {
+                    // keys relative to the parent: a bone (its bind pose as written) or an object
+                    double[] p = sc.Rig != null ? sc.Rig.RawOf(d.Parent) : null;
+                    if (p == null && !(rawTm.TryGetValue(d.Parent, out p) && rawNames.Contains(d.Parent))) p = null;
+                    double[] rest = p != null && Rig.Usable(p) ? Rig.Mul43(Tm(g), Inverse(p)) : Tm(g);
+                    Rig.Track t = Rig.ReadTrack(anim, Rig.EngineStatic(g, rest, d.Parent.Length > 0), true);
+                    d.PosKeys = t.Pos; d.RotKeys = t.Rot; d.ScaleKeys = t.Scale; d.KeyCount = t.Count; d.LastTick = t.LastTick;
+                    StringBuilder rr = new StringBuilder();
+                    foreach (double v in Tm(g)) { if (rr.Length > 0) rr.Append(' '); rr.Append(v.ToString("R", U.CI)); }
+                    d.RestRows = rr.ToString();
+                    if (t.LastTick / 160.0 > sc.LastFrame) sc.LastFrame = (int)Math.Ceiling(t.LastTick / 160.0);
+                }
                 sc.Objects.Add(d);
             }
+            sc.PackMaterialIds();
             return sc;
+        }
+
+        // A 3ds Max Multi/Sub material holds at most 1000 sub-materials.  When the faces use higher
+        // ids (lost.ASE has a 3467-slot material), the ids in use are packed together; the
+        // exporter then writes the packed material, which the game draws the same.
+        const int MaxSubs = 1000;
+        Dictionary<int, List<int>> packed = new Dictionary<int, List<int>>();   // matRef -> original id per packed id
+        void PackMaterialIds()
+        {
+            Dictionary<int, SortedDictionary<int, bool>> used = new Dictionary<int, SortedDictionary<int, bool>>();
+            foreach (GeomData o in Objects)
+                if (o.Kind == "geom" && o.MaterialRef >= 0)
+                {
+                    if (!used.ContainsKey(o.MaterialRef)) used[o.MaterialRef] = new SortedDictionary<int, bool>();
+                    foreach (int i in o.UsedMtlIds) used[o.MaterialRef][i] = true;
+                }
+            foreach (KeyValuePair<int, SortedDictionary<int, bool>> kv in used)
+            {
+                List<int> ids = new List<int>(kv.Value.Keys);
+                if (ids.Count == 0 || ids[ids.Count - 1] < MaxSubs || ids.Count > MaxSubs) continue;
+                packed[kv.Key] = ids;
+                Dictionary<int, int> to = new Dictionary<int, int>();
+                for (int k = 0; k < ids.Count; k++) to[ids[k]] = k;
+                foreach (GeomData o in Objects)
+                {
+                    if (o.Kind != "geom" || o.MaterialRef != kv.Key) continue;
+                    StringBuilder sm = new StringBuilder("#(");
+                    for (int f = 0; f < o.FaceMtl.Count; f++) { if (f > 0) sm.Append(','); sm.Append(to[o.FaceMtl[f]] + 1); }
+                    o.MatIds = sm.Append(')').ToString();
+                    for (int k = 0; k < o.UsedMtlIds.Length; k++) o.UsedMtlIds[k] = to[o.UsedMtlIds[k]];
+                }
+            }
         }
 
         static void Collect(Node n, List<Node> outl)
@@ -940,7 +1228,9 @@ namespace PTAse
                 u[r] = new double[] { m[r * 3] / ln[r], m[r * 3 + 1] / ln[r], m[r * 3 + 2] / ln[r] };
             }
             double d01 = Dot3(u[0], u[1]), d02 = Dot3(u[0], u[2]), d12 = Dot3(u[1], u[2]);
-            if (Math.Max(Math.Abs(d01), Math.Max(Math.Abs(d02), Math.Abs(d12))) < 1e-3) return m;
+            // (any skew, even the 4th-decimal kind: a node holds it only approximately - a scaled plane
+            // of a 2012 map was 0.026 off - while the vertices take it exactly)
+            if (Math.Max(Math.Abs(d01), Math.Max(Math.Abs(d02), Math.Abs(d12))) < 1e-12) return m;
             double[] v1 = new double[] { u[1][0] - d01 * u[0][0], u[1][1] - d01 * u[0][1], u[1][2] - d01 * u[0][2] };
             double n1 = Math.Sqrt(Dot3(v1, v1));
             for (int k = 0; k < 3; k++) v1[k] /= n1;
@@ -960,7 +1250,7 @@ namespace PTAse
                 U.F(m[6]), U.F(m[7]), U.F(m[8]), U.F(m[9]), U.F(m[10]), U.F(m[11]));
         }
 
-        static double[] Inverse(double[] m)
+        internal static double[] Inverse(double[] m)
         {
             double a = m[0], b = m[1], c = m[2], d = m[3], e = m[4], f = m[5], g = m[6], h = m[7], i = m[8];
             double A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
@@ -1022,7 +1312,7 @@ namespace PTAse
             faces = sf.ToString();
         }
 
-        static GeomData BuildGeom(Node g, Scene sc)
+        static GeomData BuildGeom(Node g, Scene sc, bool rawPivot)
         {
             Node mesh = g.Find("*MESH");
             if (mesh == null) return null;
@@ -1030,9 +1320,10 @@ namespace PTAse
             d.Name = U.Unq(g.Val("*NODE_NAME", "Object"));
             d.Parent = U.Unq(g.Val("*NODE_PARENT", ""));
             d.MaterialRef = U.I(g.Val("*MATERIAL_REF", "-1"));
-            double[] tm = Plain(Tm(g));
+            // an animated prop (or its parent) keeps its exact pivot, mirrored or not
+            double[] tm = rawPivot ? Tm(g) : Plain(Tm(g));
             double det = tm[0] * (tm[4] * tm[8] - tm[5] * tm[7]) - tm[1] * (tm[3] * tm[8] - tm[5] * tm[6]) + tm[2] * (tm[3] * tm[7] - tm[4] * tm[6]);
-            if (det < 0)
+            if (det < 0 && !rawPivot)
             {
                 // Mirrored pivot: keep world-space vertices (their winding is what the
                 // game draws) with an identity transform instead of a negative scale.
@@ -1082,6 +1373,7 @@ namespace PTAse
                         foreach (string grp in p[0].Split(',')) { int gi = U.I(grp); if (gi >= 1 && gi <= 32) smg |= 1 << (gi - 1); }
                 }
                 used.Add(mid);
+                d.FaceMtl.Add(mid);
                 if (d.NumFaces > 0) { sf.Append(','); sm.Append(','); sg.Append(','); }
                 sf.Append('[').Append(a + 1).Append(',').Append(b + 1).Append(',').Append(cc + 1).Append(']');
                 sm.Append(mid + 1);
@@ -1178,11 +1470,13 @@ namespace PTAse
             string baseName = Path.GetFileNameWithoutExtension(FileName) + "_" + (top0 != null ? top0.Name : "mat");
             int maxId = ids.Count > 0 ? ids[ids.Count - 1] + 1 : 1;
             sb.Append("(\nlocal mm = multimaterial numsubs:").Append(maxId).Append(" name:").Append(U.MS(baseName)).Append("\n");
-            sb.Append("local s, b, c, lb, ob, vc, vp\n");
+            sb.Append("local s, b, c, lb, ob, vc, vp, si\n");
             MatDef top = top0;
+            List<int> orig;
+            packed.TryGetValue(matRef, out orig);
             foreach (int mid in ids)
             {
-                MatDef md = top == null ? null : top.Resolve(mid);
+                MatDef md = top == null ? null : top.Resolve(orig != null ? orig[mid] : mid);
                 sb.Append(StdScript(md, mode, hasVC, layers, searchDir));
                 sb.Append("mm.materialList[").Append(mid + 1).Append("] = s\n");
             }
@@ -1242,6 +1536,8 @@ namespace PTAse
                 Directory.CreateDirectory(dir);
                 string outp = Path.Combine(dir, ((uint)Path.GetFullPath(path).ToLowerInvariant().GetHashCode()).ToString("x8")
                                                 + "_" + Path.GetFileName(path));
+                // the game's own file, for the exporter (TexInfo.Original)
+                if (!File.Exists(outp + ".src")) File.WriteAllText(outp + ".src", Path.GetFullPath(path));
                 if (File.Exists(outp)) return outp;
                 byte[] d = File.ReadAllBytes(path);
                 if (bmp) { d[0] = (byte)'B'; d[1] = (byte)'M'; for (int i = 2; i < 14 && i < d.Length; i++) d[i] = (byte)(d[i] - i * i); }
@@ -1324,6 +1620,20 @@ namespace PTAse
                             sb.Append("c = RGB_Multiply map1:c map2:lb name:\"layer\"\n");
                     }
             }
+            else if (layers)
+            {
+                // no texture of its own, only layers (i2-bip01's scrolling FS_SCROLL2 effect): they
+                // go to the self-illumination slot, which the exporter writes back as layers
+                bool any = false;
+                foreach (MapDef l in md.Layers)
+                {
+                    if (l.Bitmap == "") continue;
+                    sb.Append(Bmp("lb", l, searchDir));
+                    sb.Append(any ? "si = RGB_Multiply map1:si map2:lb name:\"layer\"\n" : "si = lb\n");
+                    any = true;
+                }
+                if (any) sb.Append("s.selfIllumMap = si\n");
+            }
             if (hasVC)
             {
                 sb.Append("vc = Vertex_Color()\n");
@@ -1342,7 +1652,7 @@ namespace PTAse
                 if (same) sb.Append("ob.monoOutput = 1\n");      // alpha channel
                 sb.Append("s.opacityMap = ob\n");
             }
-            if (md.Transparency > 0.02) sb.Append("s.opacity = ").Append(U.F((1 - md.Transparency) * 100)).Append("\n");
+            if (md.Transparency > 0) sb.Append("s.opacity = ").Append(U.F((1 - md.Transparency) * 100)).Append("\n");
             bool texAlpha = hasTex && HasAlpha(Resolve(md.DiffuseMap.Bitmap, searchDir));
             bool hasOpMap = md.OpacityMap != null && md.OpacityMap.Bitmap != "" && hasTex;
             if (!hasOpMap && hasTex && (texAlpha || md.Additive))

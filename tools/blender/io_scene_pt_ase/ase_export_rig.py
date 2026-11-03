@@ -20,7 +20,7 @@ import math
 import bpy
 from mathutils import Matrix, Quaternion
 
-from .ase_anim import AXIS, AXIS_INV
+from .ase_anim import bind_maps, bone_axes, inv4, raw_worlds
 
 
 def _f4(x):
@@ -98,6 +98,32 @@ def physique(ob, me, bone_names):
     return out, unassigned
 
 
+def _same_rest(m, ref):
+    """A bone still at its imported rest pose: rotation within 2e-3, position within 2e-3 plus
+    the 32-bit float step of where it is (map props sit ~40000 units out: 0.004 steps)."""
+    for i in range(3):
+        for j in range(3):
+            if abs(m[i][j] - ref[i][j]) >= 2e-3:
+                return False
+        if abs(m[i][3] - ref[i][3]) >= 2e-3 + 4e-7 * abs(ref[i][3]):
+            return False
+    return True
+
+
+def unbind_maps(arm):
+    """{bone: A^-1} (nested doubles, armature space): undoes the importer's bind maps on the
+    skinned vertices (ase_anim.bind_maps), for bones still at their imported rest pose."""
+    bind = json.loads(arm.get('pt_bind', '{}'))
+    axes = bone_axes(arm)
+    rigid = {}
+    for b in arm.data.bones:
+        if b.name in bind:
+            ref = Matrix(bind[b.name])
+            if _same_rest(b.matrix_local @ axes[b.name].inverted(), ref):
+                rigid[b.name] = ref
+    return {nm: inv4(a) for nm, a in bind_maps(rigid, raw_worlds(arm)).items()}
+
+
 def write_physique(w, names):
     assigned = [(i, n) for i, n in enumerate(names) if n]
     w('\t*PHYSIQUE {')
@@ -137,13 +163,14 @@ def bone_rest_rows(arm, space):
     raw = json.loads(arm.get('pt_bind_raw', '{}'))
     bind = json.loads(arm.get('pt_bind', '{}'))
     untouched_object = all(abs(sa[i][j] - (1.0 if i == j else 0.0)) < 1e-5 for i in range(4) for j in range(4))
+    axes = bone_axes(arm)
     out = {}
     for b in arm.data.bones:
-        W = sa @ b.matrix_local @ AXIS_INV
+        ax = axes[b.name]
+        W = sa @ b.matrix_local @ ax.inverted()
         rows = _rows_of(W)
         if untouched_object and b.name in raw and b.name in bind:
-            ref = Matrix(bind[b.name]) @ AXIS
-            if all(abs(b.matrix_local[i][j] - ref[i][j]) < 2e-3 for i in range(4) for j in range(4)):
+            if _same_rest(b.matrix_local, Matrix(bind[b.name]) @ ax):
                 rows = raw[b.name]
         out[b.name] = rows
     return out
@@ -224,12 +251,13 @@ def bone_tracks(arm, space, action):
     # importer built the animation from: Blender's own bone matrices lose a little precision
     # (bone roll), which adds up along long bone chains.
     bind = json.loads(arm.get('pt_bind', '{}'))
+    axes = bone_axes(arm)
     rest = {}
     for b in arm.data.bones:
-        W = b.matrix_local @ AXIS_INV
+        W = b.matrix_local @ axes[b.name].inverted()
         if b.name in bind:
             ref = Matrix(bind[b.name])
-            if all(abs(W[i][j] - ref[i][j]) < 2e-3 for i in range(4) for j in range(4)):
+            if _same_rest(W, ref):
                 W = ref
         rest[b.name] = W
     out = {}
@@ -239,10 +267,12 @@ def bone_tracks(arm, space, action):
             continue
         pb = arm.pose.bones[b.name]
         frames = sorted({round(k.co[0], 4) for fc in fcs.values() for k in fc.keyframe_points})
-        # local 3ds Max transform = pre @ basis @ AXIS_INV, with W = rest pose in 3ds Max axes:
-        #   child: W_parent^-1 @ W @ AXIS      root: export space @ W @ AXIS
+        # local 3ds Max transform = pre @ basis @ AX^-1, with W = rest pose in 3ds Max axes and
+        # AX the bone's axes (bone_axes):  child: W_parent^-1 @ W @ AX   root: export space @ W @ AX
         Wb = rest[b.name]
-        pre = ((rest[b.parent.name].inverted() @ Wb) if b.parent else (sa @ Wb)) @ AXIS
+        ax = axes[b.name]
+        ax_inv = ax.inverted()
+        pre = ((rest[b.parent.name].inverted() @ Wb) if b.parent else (sa @ Wb)) @ ax
         has_scale = any(k[0] == 'scale' for k in fcs)
 
         def ch(prop, i, default, f):
@@ -260,7 +290,7 @@ def bone_tracks(arm, space, action):
             q.normalize()
             s = [ch('scale', i, pb.scale[i], f) for i in range(3)]
             basis = Matrix.LocRotScale(loc, q, s)
-            L = pre @ basis @ AXIS_INV                        # local (parent-relative) 3ds Max transform
+            L = pre @ basis @ ax_inv                          # local (parent-relative) 3ds Max transform
             t, lq, ls = L.decompose()
             tick = int(round(f * 160.0))
             pos.append((tick, t[0], t[1], t[2]))
@@ -279,6 +309,91 @@ def bone_tracks(arm, space, action):
             last = cur
         out[b.name] = (pos, rot, scl)
     return out
+
+
+def keys_from_locals(samples, with_scale):
+    """[(tick, local Matrix in 3ds Max axes)] -> ASE (pos, rot, scale) keys: position relative to
+    the parent, rotation as a turn from the previous key (first absolute), scale."""
+    pos, rot, scl = [], [], []
+    last = (1.0, 0.0, 0.0, 0.0)
+    for tick, L in samples:
+        t, lq, ls = L.decompose()
+        pos.append((tick, t[0], t[1], t[2]))
+        if with_scale:
+            scl.append((tick, ls[0], ls[1], ls[2]))
+        cur = (lq.w, lq.x, lq.y, lq.z)
+        d = _qmul(last, (cur[0], -cur[1], -cur[2], -cur[3]))     # q_prev * conj(q_cur), shortest
+        if d[0] < 0.0:
+            d = (-d[0], -d[1], -d[2], -d[3])
+        sn = math.sqrt(d[1] * d[1] + d[2] * d[2] + d[3] * d[3])
+        if sn < 1e-12:
+            rot.append((tick, 0.0, 0.0, 0.0, 0.0))
+        else:
+            rot.append((tick, d[1] / sn, d[2] / sn, d[3] / sn, 2.0 * math.atan2(sn, d[0])))
+        last = cur
+    return pos, rot, scl
+
+
+def object_track(ob, local_of):
+    """Keys of an object's own animation (its action's location / rotation / scale curves),
+    sampled at every keyframe.  local_of(basis) -> the ASE local matrix.  None = no animation."""
+    ad = ob.animation_data
+    act = ad.action if ad else None
+    if act is None:
+        return None
+    from bpy_extras.anim_utils import action_get_channelbag_for_slot
+    bag = None
+    if hasattr(act, 'slots'):
+        slot = ad.action_slot
+        bag = action_get_channelbag_for_slot(act, slot) if slot else None
+    curves = list(bag.fcurves) if bag is not None else list(getattr(act, 'fcurves', []))
+    fcs = {(fc.data_path, fc.array_index): fc for fc in curves
+           if fc.data_path in ('location', 'rotation_quaternion', 'rotation_euler', 'scale')}
+    if not fcs:
+        return None
+    frames = sorted({round(k.co[0], 4) for fc in fcs.values() for k in fc.keyframe_points})
+
+    def ch(path, i, default, f):
+        fc = fcs.get((path, i))
+        return fc.evaluate(f) if fc is not None else default
+    with_scale = any(p == 'scale' for p, _i in fcs)
+    samples = []
+    for f in frames:
+        loc = [ch('location', i, ob.location[i], f) for i in range(3)]
+        if ob.rotation_mode == 'QUATERNION':
+            q = Quaternion([ch('rotation_quaternion', i, ob.rotation_quaternion[i], f) for i in range(4)])
+        elif ob.rotation_mode == 'AXIS_ANGLE':
+            aa = ob.rotation_axis_angle
+            q = Quaternion(aa[1:], aa[0])
+        else:
+            from mathutils import Euler
+            q = Euler([ch('rotation_euler', i, ob.rotation_euler[i], f) for i in range(3)], ob.rotation_mode).to_quaternion()
+        q.normalize()
+        s = [ch('scale', i, ob.scale[i], f) for i in range(3)]
+        samples.append((int(round(f * 160.0)), local_of(Matrix.LocRotScale(loc, q, s))))
+    return keys_from_locals(samples, with_scale)
+
+
+def write_tm_animation(w, name, tr, ind='\t'):
+    pos, rot, scl = tr
+    i2, i3 = ind + '\t', ind + '\t\t'
+    w('%s*TM_ANIMATION {' % ind)
+    w('%s*NODE_NAME %s' % (i2, _q(name)))
+    w('%s*CONTROL_POS_TRACK {' % i2)
+    for t, px, py, pz in pos:
+        w('%s*CONTROL_POS_SAMPLE %d\t%s\t%s\t%s' % (i3, t, _f6(px), _f6(py), _f6(pz)))
+    w('%s}' % i2)
+    w('%s*CONTROL_ROT_TRACK {' % i2)
+    for t, ax, ay, az, ang in rot:
+        w('%s*CONTROL_ROT_SAMPLE %d\t%s\t%s\t%s\t%s' % (i3, t, _f9(ax), _f9(ay), _f9(az), _f9(ang)))
+    w('%s}' % i2)
+    if scl:
+        w('%s*CONTROL_SCALE_TRACK {' % i2)
+        for t, sx, sy, sz in scl:
+            w('%s*CONTROL_SCALE_SAMPLE %d\t%s\t%s\t%s\t0.0000\t0.0000\t0.0000\t0.0000'
+              % (i3, t, _f6(sx), _f6(sy), _f6(sz)))
+        w('%s}' % i2)
+    w('%s}' % ind)
 
 
 def write_bones(w, arm, space, tracks):
@@ -314,24 +429,7 @@ def write_bones(w, arm, space, tracks):
         w('\t*PROP_RECVSHADOW 1')
         tr = tracks.get(b.name)
         if tr:
-            pos, rot, scl = tr
-            w('\t*TM_ANIMATION {')
-            w('\t\t*NODE_NAME %s' % _q(b.name))
-            w('\t\t*CONTROL_POS_TRACK {')
-            for t, px, py, pz in pos:
-                w('\t\t\t*CONTROL_POS_SAMPLE %d\t%s\t%s\t%s' % (t, _f6(px), _f6(py), _f6(pz)))
-            w('\t\t}')
-            w('\t\t*CONTROL_ROT_TRACK {')
-            for t, ax, ay, az, ang in rot:
-                w('\t\t\t*CONTROL_ROT_SAMPLE %d\t%s\t%s\t%s\t%s' % (t, _f9(ax), _f9(ay), _f9(az), _f9(ang)))
-            w('\t\t}')
-            if scl:
-                w('\t\t*CONTROL_SCALE_TRACK {')
-                for t, sx, sy, sz in scl:
-                    w('\t\t\t*CONTROL_SCALE_SAMPLE %d\t%s\t%s\t%s\t0.0000\t0.0000\t0.0000\t0.0000'
-                      % (t, _f6(sx), _f6(sy), _f6(sz)))
-                w('\t\t}')
-            w('\t}')
+            write_tm_animation(w, b.name, tr)
         w('\t*WIREFRAME_COLOR 0.6510\t0.7922\t0.9412')
         w('}')
     return len(arm.data.bones)

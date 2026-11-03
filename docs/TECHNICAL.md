@@ -182,7 +182,64 @@ Round trips (`scripts\roundtrip_check.py`, `static_check.py`, `blender_roundtrip
 Blender keeps faces that share their three vertices with another face (back faces of two-sided parts, doubled
 overlays) by giving them their own vertex copies; only zero-area faces are dropped.
 
-## Status (v1.3.2)
+## What the game does with animation, and how the plug-ins follow it (v1.3.3)
+
+Engine rules (`smObj3d.cpp` `TmAnimation` / `GetRotFrame`, `smRead3d.cpp`), all modelled in `scripts\game_pose.py`
+and `scripts\ase_pose.py`, which the test suites compare against:
+
+- **A channel without keys** while others have some: the node's stored local value, read from `*TM_POS` and
+  `*TM_ROTAXIS` / `*TM_ROTANGLE`, which 3ds Max writes relative to the parent. The rows are world space and rounded,
+  so a helper scaled to 0.017 is far off there. No scale.
+- **A node without keys at all:** `Tm × parent->TmInvert`, scale and skew included. A mirrored one (IceSerpent's wing
+  bones) is written by the converter as a negative scale next to a proper rotation.
+- **Glued files:** a motion piece counts as keyed by rotation or position keys, or by scale keys that do not start at
+  the first one (`NumTmScale > 0`). frost's weapon scale keys therefore never play; the converter now leaves them out.
+- **Between two keys** the game slerps from a zero quaternion towards the key's turn, i.e. it blends the matrix towards
+  the turn: the short way round. 3ds Max writes a windmill turning 0.34 rad a frame as "5.94 rad about −z"; readers that
+  turn 5.94 rad spin the long way between frames.
+- Before the first key the first key's value holds; from a channel's last key on, the stored value (the last key itself
+  is never shown, and some files carry junk there: Grangium scales a bone to 0 at its last tick).
+- **Skinning** uses each bone's bind pose as written (bones scaled 0.89 in many monsters, 8.8 noise in all). Blender
+  moves the skinned vertices once by `rigid rest × written bind⁻¹` (`ase_anim.bind_maps`, undone on export); 3ds Max
+  binds the Skin with the bones at the written bind pose and then puts them back, so the mesh itself is unchanged.
+- **Rigid parts of characters** with their own keys and an empty `*PHYSIQUE` (Deius' Circle001, FlameMaiden's
+  `bip01 Bone00x`) ride on their bone and play their keys; the empty `*PHYSIQUE` is written back (it marks a mesh,
+  not a bone).
+
+Program limits worked around:
+
+- 3ds Max: a linear rotation controller turns the way the stored quaternions say, so keys are kept on one side
+  (a sign flip spun bones 180°); Auto Key's extra frame-0 key is removed (salon's keys start at frame −30); keys are
+  read from the controllers rather than world matrices (32-bit floats lose 0.004 at map coordinates); a Multi/Sub
+  material holds at most 1000 sub-materials (lost.ASE has a 3467-slot one: the used ids are packed); a skewed pivot is
+  squared (a node holds skew only approximately); Skin weights are read through the SDK (`PT_ASE_Skin.cs`), because
+  skinOps needs the Modify panel (a second per mesh: a 45-mesh armour exported in minutes, now 0.2 s).
+- Blender: a bone pointing along −Y has an ill-conditioned roll, which far from the origin came out 13° off on the Bip
+  props of the Iron maps; such bones point the other way (`ase_anim.AXIS_FLIP`). Fine turns are sampled at whole
+  ticks, and "the bone is unchanged" checks allow for float steps far from the origin.
+
+Test suites: `scripts\bltest\run_suite.py` (Blender) and `scripts\maxtest\run_max_suite.py` (3ds Max) import every
+file, check placement, the pose against the game (characters/monsters) or the ASE's own animation (props), export,
+compare with the original (geometry, UVs, materials, bones, skin, poses) and import the export again
+(`scripts\maxtest\summary.py` sums a run up). Last runs:
+
+| | Blender, all 4509 files | 3ds Max, 1337 files (all monsters, NPCs, props, originals) |
+|---|---|---|
+| Errors | 0 | 0 |
+| Pose vs the game, median / typical worst | 0.0055 / 0.3 | 0.015 / 0.3 |
+| Moving props vs their ASE, worst | 0.018 | 0.0095 |
+| Export → same poses, worst | 0.045 (an original Bip prop) | 0.007 |
+| Files flagged | 38 | 26 |
+
+What is still flagged is game data, not the plug-ins: 17 monsters where the converter's ASE is 0.5–1.1 off the
+game's 8.8 maths (Monsliver, Monnazz …), R_Ground at its very last tick, i1-ani05_Bip (a bone whose stored matrices
+put it 130 000 units out), objects of original maps parented to 3ds Max groups (the game ignores groups), big maps at
+float precision (0.01–0.03), and artist files whose bones are missing (CtfbF40, TfbF06).
+
+Before this work, 3ds Max was up to 13.8 off the game (monavelrisk-sword: a quaternion sign flip), 5.2 (spider:
+scaled bind poses) and 2.6 (salon: keys before frame 0); Blender flagged 257 of the 4509 files.
+
+## Status (v1.3.3)
 
 Done and verified (see `src\README_SOURCE.md` for the check list):
 1. Converter (C# exe + Python reference, byte-identical): skeleton lookup (`.inx`/`.ini` → class skeleton from the file

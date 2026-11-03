@@ -14,6 +14,7 @@ import math
 import os
 import tempfile
 import time
+import zlib
 
 import bpy
 from mathutils import Matrix, Vector
@@ -181,7 +182,11 @@ class ImageCache(object):
                 with open(real, 'rb') as f:
                     data, _ = decode_texture_bytes(f.read())
                 os.makedirs(self.cache_dir, exist_ok=True)
-                out = os.path.join(self.cache_dir, '%08x_%s' % (abs(hash(real)) & 0xffffffff, os.path.basename(real)))
+                # stable name (path, size, date): the same texture reuses its decoded copy in
+                # every session instead of piling up a new one each time
+                st = os.stat(real)
+                key = '%s|%d|%d' % (os.path.abspath(real).lower(), st.st_size, int(st.st_mtime))
+                out = os.path.join(self.cache_dir, '%08x_%s' % (zlib.crc32(key.encode('utf-8')), os.path.basename(real)))
                 if not os.path.isfile(out):
                     with open(out, 'wb') as f:
                         f.write(data)
@@ -193,6 +198,13 @@ class ImageCache(object):
                 img = None
         if img is None:
             self.missing.add(path)
+            if path:
+                # keep the reference: a placeholder that points at the original file (Blender
+                # shows it pink), so the material still exports with its texture
+                img = bpy.data.images.new(os.path.basename(path.replace('\\', '/')) or 'missing', 8, 8)
+                img.source = 'FILE'
+                img.filepath = path
+                img['pt_missing'] = True
         self.images[path] = img
         return img
 
@@ -456,7 +468,9 @@ def _plain_rows(rows):
     carried one) becomes an identity pivot; a skewed one (rows not at right angles, e.g. the
     inverse of an 8.8 fixed-point matrix) gets square axes of the same lengths, because an
     object transform has no skew: without this the mesh would sit off its bones.  The
-    vertices are world space, so they are simply made local to the pivot used here."""
+    vertices are world space, so they are simply made local to the pivot used here.
+    Even the tiny skew of rows written with 4 decimals matters: a scaled-down object whose
+    vertices lie far from its pivot (a long plane in a 2012 map) moved 17 units with it."""
     ident = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
     t = rows[3] if all(math.isfinite(x) for x in rows[3]) else [0.0, 0.0, 0.0]
     r = rows[:3]
@@ -467,7 +481,7 @@ def _plain_rows(rows):
         return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
     ln = [math.sqrt(dot(row, row)) for row in r]
     u = [[x / ln[i] for x in r[i]] for i in range(3)]
-    if max(abs(dot(u[0], u[1])), abs(dot(u[0], u[2])), abs(dot(u[1], u[2]))) < 1e-3:
+    if max(abs(dot(u[0], u[1])), abs(dot(u[0], u[2])), abs(dot(u[1], u[2]))) < 1e-12:
         return [list(row) for row in r] + [list(t)]
     d = dot(u[1], u[0])
     v1 = [u[1][k] - d * u[0][k] for k in range(3)]
@@ -497,6 +511,18 @@ def _inv3(r):
             [C / det, -(a * h - b * g) / det, (a * e - b * d) / det]]
 
 
+def _dbl_rows(flat):
+    """ob['ase_tm'] (12 floats, ASE rows) -> column-vector 4x4 as nested doubles."""
+    f = list(flat)
+    return [[f[0], f[3], f[6], f[9]], [f[1], f[4], f[7], f[10]], [f[2], f[5], f[8], f[11]], [0.0, 0.0, 0.0, 1.0]]
+
+
+def _tm_list(flat):
+    """ob['ase_tm'] (12 floats) -> 4 rows."""
+    f = list(flat)
+    return [f[0:3], f[3:6], f[6:9], f[9:12]]
+
+
 def _rows_matrix(r):
     return Matrix(((r[0][0], r[1][0], r[2][0], r[3][0]),
                    (r[0][1], r[1][1], r[2][1], r[3][1]),
@@ -517,7 +543,7 @@ def _read_uv_block(block):
     return tv, faces
 
 
-def build_mesh_steps(node, name, mats, mref, mb, opts):
+def build_mesh_steps(node, name, mats, mref, mb, opts, raw_pivot=False):
     """Generator: yields progress 0..1 while building; returns the object (or None)."""
     m = find(node, '*MESH')
     if m is None:
@@ -563,13 +589,21 @@ def build_mesh_steps(node, name, mats, mref, mb, opts):
     # Transforms are done in Python doubles: Blender stores coordinates as 32-bit floats, which
     # only resolve ~0.008 units at PT map coordinates (~100000).  Vertices are kept small
     # (relative to the pivot) and the exact pivot is remembered for the exporter.
-    rows = _plain_rows(_tm_rows(node))
-    if _det3(rows) < 0:
+    raw = _tm_rows(node)
+    if raw_pivot and all(math.isfinite(x) for row in raw for x in row) and abs(_det3(raw)) > 1e-9:
+        # an animated object (or a parent of one): its keys turn it about its own NODE_TM, so
+        # the mesh must stay relative to exactly that pivot (a skew is absorbed by the mesh; a
+        # mirror becomes a negative object scale, as 3ds Max keeps it next to the rotation keys)
+        rows = [list(r) for r in raw]
+    else:
+        raw_pivot = False
+        rows = _plain_rows(raw)
+    if _det3(rows) < 0 and not raw_pivot:
         # Mirrored pivot: ASE vertices are world space and their winding is what the
         # game draws.  Re-applying a negative-scale matrix would flip the faces, so
         # keep world-space vertices with an identity pivot instead.
         rows = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, 0.0]]
-    if _is_identity3(rows):
+    if _is_identity3(rows) and not raw_pivot:
         # no rotation: put the pivot at the (rounded) centre so coordinates stay small
         lo = [min(v[i] for v in verts) for i in range(3)]
         hi = [max(v[i] for v in verts) for i in range(3)]
@@ -738,8 +772,22 @@ def import_ase_steps(context, filepath, opts=None, collection_name=None):
 
     nodes = _walk_geoms(root, [])
     char = opts.armature and ase_anim.is_character(root)
+    # map props with their own animation (windmills, doors): rigid object keys, no skeleton
+    rigid_anim = not ase_anim.is_character(root) and any(find(n, '*TM_ANIMATION') is not None
+                                                          for n in _walk_geoms(root, []))
     bones = ase_anim.bone_nodes(root) if char else []
     bone_names = {unquote(val(b, '*NODE_NAME', '')) for b in bones}
+    # objects with their own keys (map props; rigid parts of a character riding on a bone, Deius'
+    # Circle001) and their parents (bones aside) keep their exact NODE_TM pivot (the keys turn about it)
+    raw_names = set()
+    parent_of = {unquote(val(n, '*NODE_NAME', '')): unquote(val(n, '*NODE_PARENT', '')) for n in nodes}
+    for n in nodes:
+        nm = unquote(val(n, '*NODE_NAME', ''))
+        if find(n, '*TM_ANIMATION') is None or nm in bone_names or ase_anim.physique(n):
+            continue
+        while nm and nm not in raw_names and nm not in bone_names:
+            raw_names.add(nm)
+            nm = parent_of.get(nm, '')
     if bone_names:
         nodes = [n for n in nodes if unquote(val(n, '*NODE_NAME', '')) not in bone_names]
     # share the bar between objects by face count (one big terrain mesh dominates)
@@ -752,6 +800,7 @@ def import_ase_steps(context, filepath, opts=None, collection_name=None):
 
     by_name = {}
     created = []
+    node_of = {}
     missing_anim = ''
     for node, w in zip(nodes, weights):
         lo = 0.15 + 0.8 * acc / wsum
@@ -760,7 +809,7 @@ def import_ase_steps(context, filepath, opts=None, collection_name=None):
         name = unquote(val(node, '*NODE_NAME', 'Object'))
         if node[0] == '*GEOMOBJECT':
             mref = int(_floats(val(node, '*MATERIAL_REF', '-1'), 1)[0])
-            gen = build_mesh_steps(node, name, mats, mref, mb, opts)
+            gen = build_mesh_steps(node, name, mats, mref, mb, opts, raw_pivot=name in raw_names)
             ob = None
             try:
                 while True:
@@ -786,8 +835,15 @@ def import_ase_steps(context, filepath, opts=None, collection_name=None):
             coll_hidden.objects.link(ob)
         else:
             coll.objects.link(ob)
-        by_name[name] = ob
+        # the ASE name and position, so duplicate names (several meshes called "lizardfolk")
+        # stay apart: Blender renames the copies (.001 ...), the exporter writes the ASE name back
+        ob['ase_name'] = name
+        ob['ase_import_name'] = ob.name             # what Blender called it (an empty ASE name too)
+        ob['ase_index'] = len(created)
+        ob['ase_node_parent'] = unquote(val(node, '*NODE_PARENT', ''))
+        by_name.setdefault(name, ob)
         created.append((ob, unquote(val(node, '*NODE_PARENT', ''))))
+        node_of[ob.name] = node
         yield hi, 'Building %s' % name
 
     # skeleton: Armature + skinning (characters / monsters)
@@ -828,12 +884,19 @@ def import_ase_steps(context, filepath, opts=None, collection_name=None):
         arm_ob['pt_anim_source'] = ('shared' if bind_override else 'own') if tracks else ''
         if tracks and ase_anim.separate_motion_file(root):
             arm_ob['pt_anim_source'] = 'shared'     # the game keeps it in its own motion file
-        for node in nodes:
-            nm = unquote(val(node, '*NODE_NAME', ''))
-            ph = ase_anim.physique(node)
-            if ph and nm in by_name:
-                ase_anim.skin_mesh(by_name[nm], arm_ob, ph)
-                skinned[nm] = True
+        # animated: skinned vertices carry the difference between the written bind pose and
+        # Blender's rigid rest pose, so the animation is exactly the game's (ase_anim.bind_maps)
+        maps = ase_anim.bind_maps(bind, ase_anim.raw_worlds(arm_ob)) if tracks else {}
+        for ob, _p in created:                     # each mesh with its own node's skin
+            node = node_of.get(ob.name)
+            ph = ase_anim.physique(node) if node is not None else None
+            if ph and ob.type == 'MESH':
+                full = ase_anim.skin_mesh(ob, arm_ob, ph)
+                skinned[ob.name] = True
+                if maps and ase_anim.apply_bind_maps(ob, full, maps, _dbl_rows(ob['ase_tm'])):
+                    ob['pt_bind_fixed'] = True
+            elif ph is not None and ob.type == 'MESH':
+                ob['pt_physique_empty'] = True      # an empty *PHYSIQUE: a rigid part, kept on export
 
     # hierarchy (ASE TMs are world space; keep world placement)
     def wmat(o):
@@ -848,7 +911,6 @@ def import_ase_steps(context, filepath, opts=None, collection_name=None):
             ob.matrix_basis = w
             if parent in bone_names and ob.name not in skinned:
                 bone_kids.append((ob, parent, w))
-            del ob['ase_world']
             ob['ase_basis'] = [v for row in ob.matrix_basis for v in row]
             ob['ase_parent'] = arm_ob.name
             continue
@@ -857,9 +919,11 @@ def import_ase_steps(context, filepath, opts=None, collection_name=None):
         ob.parent = par or root_empty
         ob.matrix_parent_inverse = Matrix.Identity(4)
         ob.matrix_basis = w if par is None else wmat(par).inverted_safe() @ w
-        del ob['ase_world']
         ob['ase_basis'] = [v for row in ob.matrix_basis for v in row]
         ob['ase_parent'] = ob.parent.name if ob.parent else ''
+    for ob, _parent in created:              # only now: a child may come after its parent
+        if 'ase_world' in ob:
+            del ob['ase_world']
     context.view_layer.update()
     # rigid parts that ride on a bone (weapons, armour pieces): bone parenting
     for ob, bone, w in bone_kids:
@@ -879,6 +943,62 @@ def import_ase_steps(context, filepath, opts=None, collection_name=None):
             ase_anim.set_motions(context, arm_ob, motions, action.get('pt_last_frame', 1.0))
         elif motions:
             ase_anim.set_motions(context, arm_ob, motions, max(m[2] for m in motions))
+        if tracks:
+            # rigid parts with their own keys, relative to their bone: Blender hangs a child on
+            # the bone's tail in Blender bone axes, so the parent inverse undoes those two
+            axes = ase_anim.bone_axes(arm_ob)
+            raw_w = ase_anim.raw_worlds(arm_ob)
+            for ob, bone, _w in bone_kids:
+                node = node_of.get(ob.name)
+                if node is None or find(node, '*TM_ANIMATION') is None or bone not in arm_ob.data.bones:
+                    continue
+                tr = ase_anim.Track(node)
+                if not tr.ticks():
+                    continue
+                b = arm_ob.data.bones[bone]
+                ob.matrix_parent_inverse = Matrix.Translation((0.0, b.length, 0.0)).inverted() @ axes[bone].inverted()
+                P = raw_w.get(bone, bind.get(bone))
+                W = _rows_matrix(_tm_list(ob['ase_tm']))
+                rest_local = (P.inverted_safe() @ W) if P is not None else W
+                ase_anim.build_object_action(ob, tr, rest_local, '%s_%s' % (base, ob.name))
+                ob['ase_anim'] = True
+            # ... and those hanging on another such part (FlameMaiden's bip01 Bone004): as map props
+            kids = {o.name for o, _b, _w in bone_kids}
+            for ob, parent in created:
+                node = node_of.get(ob.name)
+                par = by_name.get(parent) if parent else None
+                if (ob.name in kids or ob.name in skinned or par is None or node is None
+                        or find(node, '*TM_ANIMATION') is None):
+                    continue
+                tr = ase_anim.Track(node)
+                if not tr.ticks():
+                    continue
+                W = _rows_matrix(_tm_list(ob['ase_tm']))
+                rest_local = _rows_matrix(_tm_list(par['ase_tm'])).inverted_safe() @ W
+                ase_anim.build_object_action(ob, tr, rest_local, '%s_%s' % (base, ob.name))
+                ob['ase_anim'] = True
+        context.view_layer.update()
+    elif rigid_anim:
+        # map props with their own keys: object animation, relative to the parent object
+        last = 0.0
+        for k, (ob, parent) in enumerate(created):
+            node = node_of.get(ob.name)
+            if node is None or find(node, '*TM_ANIMATION') is None:
+                continue
+            tr = ase_anim.Track(node)
+            if not tr.ticks():
+                continue
+            W = _rows_matrix(_tm_list(ob['ase_tm']))
+            par = by_name.get(parent) if parent else None
+            rest_local = (_rows_matrix(_tm_list(par['ase_tm'])).inverted_safe() @ W) if par is not None else W
+            act = ase_anim.build_object_action(ob, tr, rest_local, '%s_%s' % (base, ob.name))
+            ob['ase_anim'] = True
+            last = max(last, act.get('pt_last_frame', 0.0))
+            yield 0.96 + 0.04 * (k + 1) / len(created), 'Animating %s' % ob.name
+        if last > 0:
+            sc = context.scene
+            sc.frame_start = 0
+            sc.frame_end = max(sc.frame_end if sc.frame_end > 250 else 0, int(math.ceil(last)))
         context.view_layer.update()
     yield 1.0, 'Done'
     hidden = set(coll_hidden.objects.keys()) if coll_hidden else set()

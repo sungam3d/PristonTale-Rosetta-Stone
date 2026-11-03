@@ -10,7 +10,9 @@ import tempfile
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from game_pose import posed_vertices      # noqa: E402
+from game_pose import posed_vertices, posed_vertices_for      # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from smdanim.aseparse import parse_ase, find, find_all, val, unquote   # noqa: E402
 
 args = sys.argv[1:]
 pose, animf = '#animated', ''
@@ -53,7 +55,12 @@ for fr in frames:
     if fr not in got:
         print('frame %d: no data' % fr)
         continue
-    exp = posed_vertices(smd, smb, fr)
+    if nn:
+        exp = posed_vertices(smd, smb, fr)
+    else:                                   # the ASE's own skinned meshes, in its order
+        names = [unquote(val(g, '*NODE_NAME', '')) for g in find_all(parse_ase(ase), '*GEOMOBJECT')
+                 if find(g, '*PHYSIQUE') is not None]
+        exp = posed_vertices_for(smd, smb, fr, names)
     g = np.array(got[fr])
     ok = ~np.isnan(exp).any(1)
     if len(g) == len(exp) and not nn:

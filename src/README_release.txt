@@ -1,4 +1,4 @@
-PT SMD -> ASE Converter  v1.3.2
+PT SMD -> ASE Converter  v1.3.3
 ===============================
 
 Turns Priston Tale game files (.smd) into .ase files for 3ds Max and Blender:
@@ -20,7 +20,7 @@ QUICK START
    and, for player armour/heads, the m1_motions.ase ... m8_motions.ase files.
 
 2a. 3ds Max 2020+
-   Copy the 3 files from 3dsMax\ into  <3ds Max>\scripts\startup\  and restart Max.
+   Copy the 4 files from 3dsMax\ into  <3ds Max>\scripts\startup\  and restart Max.
    Customize > Customize User Interface > Toolbars > Category "PT Tools":
    drag "PT ASE Import" and "PT Motions" onto a toolbar.
    Characters come in skinned and animated; the PT Motions list plays one motion.

@@ -20,6 +20,7 @@ import time
 import bpy
 from mathutils import Matrix
 
+from . import ase_anim
 from . import ase_export_rig as rig
 
 
@@ -229,8 +230,10 @@ def _exact_rows(ob):
         return None
     if (ob.parent.name if ob.parent else '') != ob.get('ase_parent', ''):
         return None
+    # an object with its own imported animation moves every frame; its mesh stays relative to
+    # the imported pivot, which is therefore still exact
     cur = [v for row in ob.matrix_basis for v in row]
-    if any(abs(a - b) > 1e-6 * max(1.0, abs(b)) for a, b in zip(cur, basis)):
+    if not ob.get('ase_anim') and any(abs(a - b) > 1e-6 * max(1.0, abs(b)) for a, b in zip(cur, basis)):
         return None
     t = list(tm)
     return [t[0:3], t[3:6], t[6:9], t[9:12]]
@@ -312,14 +315,29 @@ def _color_corners(me):
     return None
 
 
-def _write_geom(w, ob, me, r, mat_ref, parent_name, opts, physique=None):
+def node_name(ob):
+    """The name written to the ASE: the imported ASE name when Blender only added its .001
+    suffix (several meshes may share a name, and the game's detail-level lists use names),
+    otherwise the object's name."""
+    n = ob.get('ase_name')
+    if n is None:
+        return ob.name
+    if ob.name == ob.get('ase_import_name') or ob.name == n or \
+            (n and ob.name.startswith(n + '.') and ob.name[len(n) + 1:].isdigit()):
+        return n                                    # (an empty ASE name stays empty: bak_NPC_blue)
+    return ob.name
+
+
+def _write_geom(w, ob, me, r, mat_ref, parent_name, opts, physique=None, track=None, vfix=None):
+    """vfix: {bone: 3x4+ affine (doubles)} applied to the world position of every vertex skinned
+    on that bone (undoes the importer's bind maps; physique gives the bone)."""
     me.calc_loop_triangles()
     tris = list(me.loop_triangles)
     w('*GEOMOBJECT {')
-    w('\t*NODE_NAME %s' % _q(ob.name))
+    w('\t*NODE_NAME %s' % _q(node_name(ob)))
     if parent_name:
         w('\t*NODE_PARENT %s' % _q(parent_name))
-    _write_tm(w, ob.name, r)
+    _write_tm(w, node_name(ob), r)
     w('\t*MESH {')
     w('\t\t*TIMEVALUE 0')
     w('\t\t*MESH_NUMVERTEX %d' % len(me.vertices))
@@ -331,9 +349,13 @@ def _write_geom(w, ob, me, r, mat_ref, parent_name, opts, physique=None):
     (a0, a1, a2), (b0, b1, b2), (c0, c1, c2), (t0, t1, t2) = r
     for i in range(len(me.vertices)):
         x, y, z = co[i * 3], co[i * 3 + 1], co[i * 3 + 2]
-        w('\t\t\t*MESH_VERTEX %5d\t%s\t%s\t%s' % (i, _f(x * a0 + y * b0 + z * c0 + t0),
-                                                      _f(x * a1 + y * b1 + z * c1 + t1),
-                                                      _f(x * a2 + y * b2 + z * c2 + t2)))
+        wx, wy, wz = x * a0 + y * b0 + z * c0 + t0, x * a1 + y * b1 + z * c1 + t1, x * a2 + y * b2 + z * c2 + t2
+        m = vfix.get(physique[i]) if (vfix and physique is not None and i < len(physique)) else None
+        if m is not None:
+            wx, wy, wz = (m[0][0] * wx + m[0][1] * wy + m[0][2] * wz + m[0][3],
+                          m[1][0] * wx + m[1][1] * wy + m[1][2] * wz + m[1][3],
+                          m[2][0] * wx + m[2][1] * wy + m[2][2] * wz + m[2][3])
+        w('\t\t\t*MESH_VERTEX %5d\t%s\t%s\t%s' % (i, _f(wx), _f(wy), _f(wz)))
     w('\t\t}')
     w('\t\t*MESH_FACE_LIST {')
     polys = me.polygons
@@ -383,9 +405,13 @@ def _write_geom(w, ob, me, r, mat_ref, parent_name, opts, physique=None):
     w('\t*PROP_MOTIONBLUR 0')
     w('\t*PROP_CASTSHADOW 1')
     w('\t*PROP_RECVSHADOW 1')
+    if track:
+        rig.write_tm_animation(w, node_name(ob), track)
     w('\t*MATERIAL_REF %d' % mat_ref)
     if physique is not None:
         rig.write_physique(w, physique)
+    elif ob.get('pt_physique_empty'):
+        rig.write_physique(w, [])                   # a rigid part of a character: a mesh, not a bone
     w('}')
 
 
@@ -421,6 +447,8 @@ def export_ase(context, filepath, opts=None):
     else:
         objs = [o for o in context.view_layer.objects if o.visible_get()]
     meshes = [o for o in objs if o.type in ('MESH', 'CURVE', 'SURFACE', 'META', 'FONT')]
+    # imported objects in their file order (three meshes all called "fi_d" in dfi), new ones after
+    meshes.sort(key=lambda o: (0, o.get('ase_index', 0)) if 'ase_index' in o else (1, 0))
     lights = [o for o in objs if o.type == 'LIGHT' and o.data.type == 'POINT'] if opts.include_lights else []
     # characters / monsters: the armatures of the exported meshes, plus selected armatures
     # (selecting just the armature exports the meshes it deforms too)
@@ -453,6 +481,32 @@ def export_ase(context, filepath, opts=None):
     out_dir = os.path.dirname(os.path.abspath(filepath))
     exported = set(meshes)
 
+    # objects with their own animation (map props: windmills, doors ...) keep it
+    obj_tracks = {}
+    if opts.animation != 'NEVER':
+        for ob in meshes:
+            if rig.armature_of(ob) is not None:
+                continue
+            on_bone = ob.parent_type == 'BONE' and ob.parent is not None and ob.parent.type == 'ARMATURE'                 and ob.parent_bone in ob.parent.data.bones
+            if ob.parent_type == 'BONE' and not on_bone:
+                continue
+
+            def local_of(basis, ob=ob, on_bone=on_bone):
+                if on_bone:
+                    # a rigid part riding on a bone: Blender hangs it on the bone's tail, in Blender
+                    # bone axes -> relative to the bone in 3ds Max axes, as the game reads it
+                    b = ob.parent.data.bones[ob.parent_bone]
+                    ax = ase_anim.bone_axes(ob.parent)[b.name]
+                    return ax @ Matrix.Translation((0.0, b.length, 0.0)) @ ob.matrix_parent_inverse @ basis
+                if ob.parent is not None and ob.parent in exported:
+                    return ob.matrix_parent_inverse @ basis          # relative to its ASE parent
+                pw = ob.parent.matrix_world if ob.parent is not None else Matrix.Identity(4)
+                return _export_space(ob, opts) @ pw @ ob.matrix_parent_inverse @ basis
+            tr = rig.object_track(ob, local_of)
+            if tr:
+                obj_tracks[ob] = tr
+                last_tick = max([last_tick] + [k[0] for k in tr[0] + tr[1]])
+
     # one Multi/Sub material per distinct slot list
     mat_sets = []
     mat_ref = {}
@@ -470,7 +524,7 @@ def export_ase(context, filepath, opts=None):
     w('*SCENE {')
     w('\t*SCENE_FILENAME %s' % _q(os.path.splitext(os.path.basename(filepath))[0] + '.max'))
     w('\t*SCENE_FIRSTFRAME %d' % scn.frame_start)
-    w('\t*SCENE_LASTFRAME %d' % (max(1, int(math.ceil(last_tick / 160.0))) if tracks else scn.frame_end))
+    w('\t*SCENE_LASTFRAME %d' % (max(1, int(math.ceil(last_tick / 160.0))) if (tracks or obj_tracks) else scn.frame_end))
     w('\t*SCENE_FRAMESPEED %d' % scn.render.fps)
     w('\t*SCENE_TICKSPERFRAME 160')
     w('\t*SCENE_BACKGROUND_STATIC 0.0000\t0.0000\t0.0000')
@@ -530,6 +584,7 @@ def export_ase(context, filepath, opts=None):
     total_faces = 0
     unassigned = 0
     arm_names = {a.name for a in arms}
+    unbind = {}
     for n, ob in enumerate(meshes):
         r = _exact_rows(ob) or _rows_from_matrix(_export_space(ob, opts) @ ob.matrix_world)
         a = rig.armature_of(ob) if arms else None
@@ -545,15 +600,20 @@ def export_ase(context, filepath, opts=None):
                 if ob.parent_type == 'BONE' and ob.parent is not None and ob.parent.name in arm_names:
                     parent = ob.parent_bone             # rigid part riding on a bone
                 elif skinned:
-                    parent = ''                         # follows its bones through *PHYSIQUE
+                    # follows its bones through *PHYSIQUE; a bone it hung on in the file stays its parent
+                    np_ = ob.get('ase_node_parent', '')
+                    parent = np_ if np_ and np_ in a.data.bones else ''
                 else:
-                    parent = ob.parent.name if ob.parent in exported else ''
+                    parent = node_name(ob.parent) if ob.parent in exported else ''
                 phys = None
                 if skinned:
                     phys, miss = rig.physique(ob, me, {b.name for b in a.data.bones})
                     unassigned += miss
                 # vertices are written in world space; the inverse is applied by readers via NODE_TM
-                _write_geom(w, ob, me, r, mat_ref[ob], parent, opts, phys)
+                vfix = None
+                if skinned and ob.get('pt_bind_fixed') and _pt_root(a) is not None:
+                    vfix = unbind.setdefault(a.name, rig.unbind_maps(a))
+                _write_geom(w, ob, me, r, mat_ref[ob], parent, opts, phys, obj_tracks.get(ob), vfix)
                 total_faces += len(me.loop_triangles)
             finally:
                 src.to_mesh_clear()

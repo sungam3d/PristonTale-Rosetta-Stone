@@ -162,12 +162,17 @@ class Options(object):
             setattr(self, k, v)
 
 
+GAME_TOP_FOLDERS = ('field', 'char', 'image', 'effect')
+
+
 def guess_game_root(path):
-    """Walk up from an SMD path to the folder containing 'Field'."""
+    """Walk up from an SMD path to the folder containing 'Field' (or 'char', 'image', 'effect':
+    a char folder converted on its own keeps char\\monster\\<name>\\ instead of writing every
+    model next to each other, where same-named ones overwrote each other)."""
     d = os.path.dirname(os.path.abspath(path))
     while True:
         parent = os.path.dirname(d)
-        if os.path.basename(d).lower() == 'field':
+        if os.path.basename(d).lower() in GAME_TOP_FOLDERS:
             return parent
         if parent == d:
             return os.path.dirname(os.path.abspath(path))
@@ -481,20 +486,21 @@ def _pieces(o):
     return out or None
 
 
-def _piece_track(pieces, which, keys, static):
+def _piece_track(pieces, which, keys, static, fixed=None):
     """Absolute values per piece -> one continuous track (tick, value, key index).
 
     The game looks up keys only inside the piece being played; a piece without
-    keys shows the bone's static transform.  Each piece is therefore held flat
-    up to its edges (1 tick before the next piece starts) so nothing blends
-    from one motion into the next."""
+    keys for this channel shows a fixed value (static(piece), see _anim_keys).
+    Each piece is held flat up to its edges (1 tick before the next piece starts)
+    so nothing blends from one motion into the next."""
     out = []
     for pc in pieces:
         s, e = pc[0], pc[1]
         idx, n = pc[2 + which]
-        if n <= 0 or idx < 0 or idx + n > len(keys):
-            out.append((s, static, None))
-            out.append((e - 1, static, None))
+        if n <= 0 or idx < 0 or idx + n > len(keys) or (fixed is not None and fixed(pc)):
+            v = static(pc)
+            out.append((s, v, None))
+            out.append((e - 1, v, None))
             continue
         seg = [(keys[j][0], j) for j in range(idx, idx + n)]
         if seg[0][0] > s:
@@ -510,44 +516,152 @@ def _piece_track(pieces, which, keys, static):
     return out
 
 
-def _anim_keys(o):
-    """(pos_keys, rot_keys, scale_keys) for the ASE writer, reproducing what the
-    game shows at every tick.  Rotation keys are rebuilt from the TmPrevRot cache
-    (see _rotation_keys)."""
-    pieces = _pieces(o)
-    if pieces is None:
-        return list(o.pos_keys), _rotation_keys(o), list(o.scale_keys)
-    pos = scl = rot = []
-    if o.pos_keys:
-        pos = [(t, ) + tuple(v if v is not None else o.pos_keys[j][1:4])
-               for t, v, j in _piece_track(pieces, 1, o.pos_keys, o.pos)]
-    if o.scale_keys:
-        scl = [(t, ) + tuple(v if v is not None else o.scale_keys[j][1:4])
-               for t, v, j in _piece_track(pieces, 2, o.scale_keys, o.scale)]
-    if o.rot_keys:
-        prev = o.prev_rot
-        x, y, z, w = o.quat
-        n = math.sqrt(x * x + y * y + z * z + w * w) or 1.0
-        static = tuple(c / n for c in o.quat)
+def _norm_quat(q):
+    x, y, z, w = q
+    n = math.sqrt(x * x + y * y + z * z + w * w) or 1.0
+    return (x / n, y / n, z / n, w / n)
 
-        def absolute(j):
+
+def _engine_local(o, parent):
+    """What the game shows for a node without keys (smOBJ3D::TmAnimation): Tm x parent->TmInvert,
+    from the 8.8 world matrices -> (rotation quaternion, position, scale)."""
+    tm = [[o.tm[r][c] / 256.0 for c in range(4)] for r in range(4)]
+    if parent is not None:
+        ti = [[parent.tminv[r][c] / 256.0 for c in range(4)] for r in range(4)]
+        m = []
+        for r in range(4):
+            row = []
+            for c in range(4):
+                v = 0.0
+                for k in range(4):
+                    v += tm[r][k] * ti[k][c]
+                row.append(v)
+            m.append(row)
+        tm = m
+    # a mirrored local (IceSerpent's wing bones): negative scale next to a proper rotation
+    det = (tm[0][0] * (tm[1][1] * tm[2][2] - tm[1][2] * tm[2][1]) - tm[0][1] * (tm[1][0] * tm[2][2] - tm[1][2] * tm[2][0])
+           + tm[0][2] * (tm[1][0] * tm[2][1] - tm[1][1] * tm[2][0]))
+    sign = -1.0 if det < 0 else 1.0
+    scl = []
+    rows = []
+    for r in range(3):
+        a, b, c = tm[r][0], tm[r][1], tm[r][2]
+        ln = (math.sqrt(a * a + b * b + c * c) or 1.0) * sign
+        scl.append(ln)
+        rows.append([a / ln, b / ln, c / ln])
+    return _quat_from_matrix(rows), (tm[3][0], tm[3][1], tm[3][2]), tuple(scl)
+
+
+def _rot_track(pieces, keys, prev, static):
+    """Rotation keys of a glued file from the piece track (absolute orientations -> ASE deltas)."""
+    last = (0.0, 0.0, 0.0, 1.0)
+    rot = []
+    for t, v, j in _piece_track(pieces, 0, keys, static):
+        if v is not None:
+            p = v
+        else:
             f = prev[j]
-            return _quat_from_matrix([[f[0], f[1], f[2]], [f[4], f[5], f[6]], [f[8], f[9], f[10]]])
-        last = (0.0, 0.0, 0.0, 1.0)
-        rot = []
-        for t, v, j in _piece_track(pieces, 0, o.rot_keys, static):
-            p = v if v is not None else absolute(j)
-            q = _qmul_xyzw((-last[0], -last[1], -last[2], last[3]), p)
-            if q[3] < 0.0:
-                # shortest way round: some keys store "no turn" as w = -1, which
-                # read literally would spin the bone a full circle
-                q = (-q[0], -q[1], -q[2], -q[3])
-            rot.append((t,) + _key_axis_angle(q))
-            last = p
+            p = _quat_from_matrix([[f[0], f[1], f[2]], [f[4], f[5], f[6]], [f[8], f[9], f[10]]])
+        q = _qmul_xyzw((-last[0], -last[1], -last[2], last[3]), p)
+        if q[3] < 0.0:
+            # shortest way round: some keys store "no turn" as w = -1, which
+            # read literally would spin the bone a full circle
+            q = (-q[0], -q[1], -q[2], -q[3])
+        rot.append((t,) + _key_axis_angle(q))
+        last = p
+    return rot
+
+
+def _anim_keys(o, parent=None, end=0, unkeyed=False):
+    """(pos_keys, rot_keys, scale_keys) for the ASE writer, reproducing what the game shows at
+    every tick (smOBJ3D::TmAnimation).  Rotation keys are rebuilt from the TmPrevRot cache (see
+    _rotation_keys).  Where the game falls back to values an ASE does not carry, they are
+    written as keys, so every reader (the game's own builder, 3ds Max, Blender) matches:
+      * a channel without keys while others have some: the stored local value
+        (TmRotate, px/py/pz; no scale)
+      * no keys at all (unkeyed=True, bones of an animated skeleton) or, in a glued file, a
+        piece without any key: Tm x parent->TmInvert (_engine_local)
+      * single timeline: from a channel's last key on, the stored value again (end = last tick)"""
+    static_q = _norm_quat(o.quat)
+    static_p = tuple(o.pos)
+    pieces = _pieces(o)
+    has = bool(o.pos_keys or o.rot_keys or o.scale_keys)
+    if not has:
+        if not unkeyed or end <= 0:
+            return [], [], []
+        q, p, sc = _engine_local(o, parent)
+        return _constant_keys(q, p, sc, [0, end])
+    if pieces is None:
+        pos, rot, scl = list(o.pos_keys), _rotation_keys(o), list(o.scale_keys)
+        pos, rot, scl = _fill_static(o, pos, rot, scl)
+        if end > 0:
+            pos, rot, scl = _snap_after_last(pos, rot, scl, end, static_q, static_p)
+        return pos, rot, scl
+    eng = _engine_local(o, parent)
+
+    def bare(pc):
+        # a piece the game plays without keys (smOBJ3D::TmAnimation: NumTmRot >= 0 || NumTmPos >= 0 ||
+        # NumTmScale > 0, so scale keys starting at the first one do not count - frost's weapons)
+        return pc[2][1] <= 0 and pc[3][1] <= 0 and not (pc[4][1] > 0 and pc[4][0] > 0)
+    pos = [(t,) + tuple(v if v is not None else o.pos_keys[j][1:4])
+           for t, v, j in _piece_track(pieces, 1, o.pos_keys, lambda pc: eng[1] if bare(pc) else static_p)]
+    scl = []
+    eng_scaled = any(abs(x - 1.0) > 1e-3 for x in eng[2])
+    if o.scale_keys or (eng_scaled and any(bare(pc) for pc in pieces)):
+        scl = [(t,) + tuple(v if v is not None else o.scale_keys[j][1:4])
+               for t, v, j in _piece_track(pieces, 2, o.scale_keys,
+                                           lambda pc: eng[2] if bare(pc) else (1.0, 1.0, 1.0), bare)]
+    rot = _rot_track(pieces, o.rot_keys, o.prev_rot, lambda pc: eng[0] if bare(pc) else static_q)
     return pos, rot, scl
 
 
-def _bone_object(b, keys=True):
+def _constant_keys(q, p, sc, ticks):
+    ticks = sorted(set(ticks))
+    pos = [(t,) + tuple(p) for t in ticks]
+    rot = [(ticks[0],) + _key_axis_angle(q)] + [(t, (0.0, 0.0, 0.0), 0.0) for t in ticks[1:]]
+    scl = [(t,) + tuple(sc) for t in ticks] if any(abs(x - 1.0) > 1e-3 for x in sc) else []
+    return pos, rot, scl
+
+
+def _fill_static(o, pos, rot, scl):
+    """A node keyed in rotation but not in position (or the other way round): the game then
+    uses the local position / rotation it stores (smOBJ3D px,py,pz / TmRotate), which an ASE
+    does not carry - every reader would rebuild it from the 8.8 world matrices instead, up to
+    a few tenths of a unit off along a limb (47 in a few motion files).  Written as keys."""
+    keyed = rot or pos or scl
+    if not keyed:
+        return pos, rot, scl
+    ticks = sorted({keyed[0][0], keyed[-1][0]})
+    if rot and not pos:
+        pos = [(t,) + tuple(o.pos) for t in ticks]
+    if pos and not rot:
+        q = _norm_quat(o.quat)
+        rot = [(ticks[0],) + _key_axis_angle(q)] + [(t, (0.0, 0.0, 0.0), 0.0) for t in ticks[1:]]
+    return pos, rot, scl
+
+
+def _snap_after_last(pos, rot, scl, end, static_q, static_p):
+    """Single timeline: once a channel is past its last key the game shows the stored value
+    again (TmRot[TmRotCnt-1].frame > frame ...), so a channel that ends before the skeleton
+    does gets one more key, 1 tick after its last one."""
+    if pos and pos[-1][0] + 1 <= end:
+        pos = pos + [(pos[-1][0] + 1,) + static_p]
+    if scl and scl[-1][0] + 1 <= end:
+        scl = scl + [(scl[-1][0] + 1, 1.0, 1.0, 1.0)]
+    if rot and rot[-1][0] + 1 <= end:
+        last = (0.0, 0.0, 0.0, 1.0)                  # absolute orientation at the last key
+        for k in rot:
+            (ax, ay, az), ang = k[1], k[2]
+            sn = math.sin(0.5 * ang)
+            last = _qmul_xyzw(last, (ax * sn, ay * sn, az * sn, math.cos(0.5 * ang)))
+        q = _qmul_xyzw((-last[0], -last[1], -last[2], last[3]), static_q)
+        if q[3] < 0.0:
+            q = (-q[0], -q[1], -q[2], -q[3])
+        rot = rot + [(rot[-1][0] + 1,) + _key_axis_angle(q)]
+    return pos, rot, scl
+
+
+def _bone_object(b, keys=True, parent=None, end=0):
     go = GeomObject(b.name)
     go.kind = 'bone'
     go.parent = b.parent
@@ -564,8 +678,18 @@ def _bone_object(b, keys=True):
         go.faces = [(0, 1, 2, 0), (0, 2, 3, 0), (0, 3, 4, 0), (0, 4, 1, 0),
                     (5, 4, 3, 0), (5, 3, 2, 0), (5, 2, 1, 0), (5, 1, 4, 0)]
     if keys:
-        go.pos_keys, go.rot_keys, go.scale_keys = _anim_keys(b)
+        go.pos_keys, go.rot_keys, go.scale_keys = _anim_keys(b, parent, end, unkeyed=True)
     return go
+
+
+def _skeleton_end(skel):
+    """Last key tick of a skeleton (0 = no animation)."""
+    end = 0
+    for b in skel.objects:
+        for ks in (b.pos_keys, b.rot_keys, b.scale_keys):
+            if ks and ks[-1][0] > end:
+                end = ks[-1][0]
+    return end
 
 
 def _skeleton_motions(rig_info, smb_path):
@@ -638,8 +762,12 @@ def build_model_scene(path, opt):
     sc.materials, remap = _material_remap(mats, used, opt.compact_materials)
 
     if skel is not None:
+        by_name = {b.name: b for b in skel.objects}
+        end = _skeleton_end(skel)
         for b in skel.objects:
-            sc.objects.append(_bone_object(b, keys=sc.anim_mode == 'embed'))
+            sc.objects.append(_bone_object(b, keys=sc.anim_mode == 'embed', parent=by_name.get(b.parent), end=end))
+    model_by_name = {m.name: m for m in md.objects}
+    model_end = _skeleton_end(md)
     for o in meshes:
         rows, t = _model_world(o)
         go = GeomObject(o.name)
@@ -653,7 +781,7 @@ def build_model_scene(path, opt):
         go.faces = [(a, b_, c, remap.get(m, 0)) for (a, b_, c, m) in o.faces]
         nl = max([len(l) for l in o.face_uvs] or [0])
         go.channels = _channels_from_layers(o.face_uvs, nl, 'one_minus')
-        go.pos_keys, go.rot_keys, go.scale_keys = _anim_keys(o)
+        go.pos_keys, go.rot_keys, go.scale_keys = _anim_keys(o, model_by_name.get(o.parent), model_end)
         sc.objects.append(go)
 
     ticks = md.last_frame_ticks()
@@ -674,7 +802,9 @@ def build_anim_scene(sc):
     an.anim_mode = 'embed'
     an.skeleton_file = sc.skeleton_file
     an.motions = sc.motions
-    an.objects = [_bone_object(b) for b in skel.objects]
+    by_name = {b.name: b for b in skel.objects}
+    end = _skeleton_end(skel)
+    an.objects = [_bone_object(b, parent=by_name.get(b.parent), end=end) for b in skel.objects]
     an.last_frame = max(1, skel.last_frame_ticks() // 160)
     return an
 

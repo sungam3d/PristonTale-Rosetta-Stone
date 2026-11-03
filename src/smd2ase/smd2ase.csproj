@@ -5,7 +5,7 @@
     <TargetFrameworks>net48;net8.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <AssemblyName>smd2ase</AssemblyName>
-    <Version>1.3.2</Version>
+    <Version>1.3.3</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationIcon>..\PT_SMD2ASE\PT_SMD2ASE.ico</ApplicationIcon>
     <InvariantGlobalization>true</InvariantGlobalization>

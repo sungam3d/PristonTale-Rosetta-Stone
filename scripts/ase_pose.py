@@ -10,6 +10,8 @@ Used to prove round trips: converter ASE -> import -> export -> same poses.
 """
 import bisect
 import math
+import os
+import re
 import sys
 
 import numpy as np
@@ -45,23 +47,43 @@ class Bone(object):
         r = [_fl(val(tm, k, '0 0 0'), 3) for k in ('*TM_ROW0', '*TM_ROW1', '*TM_ROW2', '*TM_ROW3')]
         self.R = np.array(r[:3])
         self.t = np.array(r[3])
+        self.mesh = find(g, '*MATERIAL_REF') is not None      # a drawn object, not a bone
+        # what the game uses for a channel without keys: TM_POS / TM_ROTAXIS + TM_ROTANGLE, which
+        # 3ds Max writes relative to the parent (used when the file has them that way: a root
+        # node, or TM_POS away from TM_ROW3; never for a mirrored node)
+        self.static = None
+        if tm is not None and val(tm, '*TM_POS') is not None and val(tm, '*TM_ROTANGLE') is not None:
+            tp = np.array(_fl(val(tm, '*TM_POS', '0 0 0'), 3))
+            if not self.parent or np.abs(tp - self.t).max() > 0.01:
+                ax = np.array(_fl(val(tm, '*TM_ROTAXIS', '0 0 1'), 3))
+                n = np.linalg.norm(ax)
+                rot = _std(ax / n, _fl(val(tm, '*TM_ROTANGLE', '0'), 1)[0]) if n > 1e-9 else np.eye(3)
+                self.static = (rot, tp)
         self.pos, self.rot, self.scl = [], [], []
         a = find(g, '*TM_ANIMATION')
         if a is not None:
+            # the key lines the game's ASE reader takes (smRead3d.cpp): samples and 3ds Max
+            # TCB / Bezier keys alike, first 4 or 5 numbers
+            rows = np.eye(3)
             for blk in a[2] or ():
-                if blk[0] == '*CONTROL_POS_TRACK':
-                    self.pos = [(f[0], np.array(f[1:4])) for f in (_fl(c[1], 4) for c in blk[2] or ())]
-                elif blk[0] == '*CONTROL_SCALE_TRACK':
-                    self.scl = [(f[0], np.array(f[1:4])) for f in (_fl(c[1], 4) for c in blk[2] or ())]
-                elif blk[0] == '*CONTROL_ROT_TRACK':
-                    rows = np.eye(3)
-                    for c in blk[2] or ():
+                for c in blk[2] or ():
+                    if c[0] in ('*CONTROL_POS_SAMPLE', '*CONTROL_TCB_POS_KEY', '*CONTROL_BEZIER_POS_KEY'):
+                        f = _fl(c[1], 4)
+                        self.pos.append((f[0], np.array(f[1:4])))
+                    elif c[0] in ('*CONTROL_SCALE_SAMPLE', '*CONTROL_TCB_SCALE_KEY', '*CONTROL_BEZIER_SCALE_KEY'):
+                        f = _fl(c[1], 4)
+                        self.scl.append((f[0], np.array(f[1:4])))
+                    elif c[0] in ('*CONTROL_ROT_SAMPLE', '*CONTROL_TCB_ROT_KEY'):
                         f = _fl(c[1], 5)
                         ax = np.array(f[1:4])
                         n = np.linalg.norm(ax)
                         ax = ax / n if n > 1e-12 else np.array([0.0, 0.0, 1.0])
-                        rows = rows @ _std(ax, f[4])
-                        self.rot.append((f[0], rows.copy(), ax, f[4]))
+                        # in between keys the game blends towards the key's turn (a slerp from a
+                        # zero quaternion, smObj3d GetRotFrame): the short way round, so a turn
+                        # of 5.94 rad about -z (as 3ds Max writes a windmill) is 0.34 about +z
+                        ang = math.remainder(f[4], 2.0 * math.pi)
+                        rows = rows @ _std(ax, ang)
+                        self.rot.append((f[0], rows.copy(), ax, ang))
 
 
 class Rig(object):
@@ -81,14 +103,25 @@ class Rig(object):
                     o = self.bones[b.name]
                     o.pos, o.rot, o.scl = b.pos, b.rot, b.scl
         self.verts, self.vbone = [], []
+        # per skinned mesh: (name, first vertex, vertex count, corners) - corners = vertex index of
+        # every corner of the faces with three different vertices (the ones every importer keeps)
+        self.parts = []
         for g in self.meshes:
+            fl = find(find(g, '*MESH'), '*MESH_FACE_LIST')
+            corners = []
+            for c in (fl[2] if fl is not None else None) or []:
+                m = re.search(r'A:\s*(\d+)\s+B:\s*(\d+)\s+C:\s*(\d+)', c[1])
+                if m and len(set(m.groups())) == 3:
+                    corners += [len(self.verts) + int(x) for x in m.groups()]
             vl = find(find(g, '*MESH'), '*MESH_VERTEX_LIST')[2] or []
+            self.parts.append((unquote(val(g, '*NODE_NAME', '')), len(self.verts), len(vl), corners))
             vs = [np.array(_fl(c[1], 4)[1:4]) for c in vl]
             names = [''] * len(vs)
-            for c in find(g, '*PHYSIQUE')[2] or ():
-                if c[0].startswith('*PHYSIQUE_VERTEXASSIGNMENT'):
-                    i, bn = c[1].split(None, 1)
-                    names[int(i)] = bn.strip().strip('"')
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bltest'))
+            from asecheck import read_physique          # the game's reading of *PHYSIQUE
+            for i, bn in read_physique(find(g, '*PHYSIQUE')).items():
+                if 0 <= i < len(names):
+                    names[i] = bn
             self.verts += vs
             self.vbone += names
 
@@ -99,6 +132,11 @@ class Rig(object):
             rest_t = (b.t - p.t) @ np.linalg.inv(p.R)
         else:
             rest, rest_t = b.R, b.t
+        rest_r = rest / np.linalg.norm(rest, axis=1)[:, None]
+        if b.static is not None and np.linalg.det(rest) > 0:
+            rest_r, rest_t = b.static
+        elif b.mesh and np.linalg.det(rest) < 0:
+            rest_r = -rest_r        # mirrored: a proper rotation next to the negative scale below
         # rotation
         if b.rot:
             ts = [k[0] for k in b.rot]
@@ -111,7 +149,7 @@ class Rig(object):
                     f = (tick - b.rot[i][0]) / (b.rot[i + 1][0] - b.rot[i][0])
                     R = R @ _std(b.rot[i + 1][2], b.rot[i + 1][3] * f)
         else:
-            R = rest / np.linalg.norm(rest, axis=1)[:, None]
+            R = rest_r
 
         def lerp(keys, default):
             if not keys:
@@ -125,7 +163,10 @@ class Rig(object):
                 return keys[i][1] + (keys[i + 1][1] - keys[i][1]) * f
             return keys[i][1]
         t = lerp(b.pos, rest_t)
-        s = lerp(b.scl, np.ones(3))
+        # no scale keys: a drawn object keeps its resting scale (3ds Max; the game bakes it into
+        # the mesh, smOBJ3D::ReformTM); a bone has none (the game applies no scale)
+        # (a mirrored node: 3ds Max keeps the mirror as a negative scale next to its rotation)
+        s = lerp(b.scl, np.linalg.norm(rest, axis=1) * np.sign(np.linalg.det(rest)) if b.mesh else np.ones(3))
         return np.diag(s) @ R, t
 
     def pose_bone(self, name, tick):

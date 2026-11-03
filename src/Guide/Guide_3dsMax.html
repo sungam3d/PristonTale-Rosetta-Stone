@@ -75,7 +75,7 @@ maps, weapons and items, monsters and characters, with textures, skeletons and a
 <div class="table-wrap"><table>
   <tr><th>File / folder</th><th>What it is</th></tr>
   <tr><td><code>PT_SMD2ASE.exe</code></td><td>The converter: game <code>.smd</code> files → <code>.ase</code> files. Nothing to install.</td></tr>
-  <tr><td><code>3dsMax\</code></td><td>The 3ds Max plug-in: importer, exporter and motion list (3 files).</td></tr>
+  <tr><td><code>3dsMax\</code></td><td>The 3ds Max plug-in: importer, exporter and motion list (4 files).</td></tr>
   <tr><td><code>smd2ase.exe</code></td><td>The same converter for the command line (optional).</td></tr>
   <tr><td><code>Blender\</code></td><td>The Blender add-on (see the Blender guide).</td></tr>
   <tr><td><code>Source\</code></td><td>All source code.</td></tr>
@@ -90,8 +90,8 @@ maps, weapons and items, monsters and characters, with textures, skeletons and a
 <h3>The 3ds Max plug-in (once)</h3>
 <ol class="steps">
   <li>Close 3ds Max.</li>
-  <li>Copy the 3 files from the <code>3dsMax</code> folder (<code>PT_ASE_Importer.ms</code>, <code>PT_ASE_Exporter.ms</code>,
-      <code>PT_ASE_Reader.cs</code>) into <code>C:\Program Files\Autodesk\3ds Max 2020\scripts\startup\</code>.</li>
+  <li>Copy the 4 files from the <code>3dsMax</code> folder (<code>PT_ASE_Importer.ms</code>, <code>PT_ASE_Exporter.ms</code>,
+      <code>PT_ASE_Reader.cs</code>, <code>PT_ASE_Skin.cs</code>) into <code>C:\Program Files\Autodesk\3ds Max 2020\scripts\startup\</code>.</li>
   <li>Start 3ds Max.</li>
   <li>Go to <b>Customize → Customize User Interface</b>, open the <b>Toolbars</b> tab, and set <b>Category</b> to
       <b>PT Tools</b>.</li>
@@ -338,7 +338,7 @@ animated models, the <code>.smb</code>) itself when it starts.</p>
 <!-- ============================================================ HELP -->
 <h2 id="help">Problems?</h2>
 <h3>"PT Tools" is missing in Customize User Interface</h3>
-<p>Check that all 3 files are in the <code>scripts\startup</code> folder, then restart 3ds Max.</p>
+<p>Check that all 4 files are in the <code>scripts\startup</code> folder, then restart 3ds Max.</p>
 <h3>The model is white or untextured</h3>
 <p>Convert with <b>Copy + decrypt textures</b> ticked and keep the <code>textures</code> folder next to the <code>.ase</code> files,
 or set <b>Extra texture folder</b>. A few textures don't exist in the game at all; they're listed in <code>missing_textures.txt</code>.</p>

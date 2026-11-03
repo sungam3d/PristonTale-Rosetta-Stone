@@ -92,18 +92,14 @@ def bone_local(o, tick):
     return np.diag(s) @ R, p
 
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import game_pose                                            # noqa: E402  (the game's own pose maths)
 skel = Model(smb)
 mesh = Model(smd)
 mesh_ob = next(o for o in bpy.data.objects if o.type == 'MESH' and o.find_armature())
 for fr in frames:
     tick = fr * 160.0
-    world = {}
-    for b in skel.objects:
-        R, p = bone_local(b, tick)
-        if b.parent in world:
-            PR, Pp = world[b.parent]
-            R, p = R @ PR, p @ PR + Pp
-        world[b.name] = (R, p)
+    world = game_pose.world_of(skel, tick)
     bpy.context.scene.frame_set(int(fr))
     dg = bpy.context.evaluated_depsgraph_get()
     exp = []
@@ -130,13 +126,7 @@ if os.environ.get('PT_DIAG'):
     fr = frames[-1]
     tick = fr * 160.0
     bpy.context.scene.frame_set(int(fr))
-    world = {}
-    for b in skel.objects:
-        R, p = bone_local(b, tick)
-        if b.parent in world:
-            PR, Pp = world[b.parent]
-            R, p = R @ PR, p @ PR + Pp
-        world[b.name] = (R, p)
+    world = game_pose.world_of(skel, tick)
     rows = []
     for b in skel.objects:
         pb = arm.pose.bones.get(b.name)

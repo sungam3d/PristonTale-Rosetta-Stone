@@ -14,7 +14,7 @@ rem  Optional:  build_release.cmd standalone
 rem    also publishes a self-contained .NET 8 build (~70 MB single exe).
 rem ---------------------------------------------------------------------------
 setlocal
-set VER=1.3.2
+set VER=1.3.3
 set ROOT=%~dp0..
 set OUT=%ROOT%\release\PT_SMD2ASE_v%VER%
 
@@ -29,6 +29,7 @@ copy /y "%~dp0smd2ase\bin\Release\net48\smd2ase.exe" "%OUT%\" >nul || goto :fail
 copy /y "%ROOT%\tools\max\PT_ASE_Importer.ms" "%OUT%\3dsMax\" >nul || goto :fail
 copy /y "%ROOT%\tools\max\PT_ASE_Exporter.ms" "%OUT%\3dsMax\" >nul || goto :fail
 copy /y "%ROOT%\tools\max\PT_ASE_Reader.cs"   "%OUT%\3dsMax\" >nul || goto :fail
+copy /y "%ROOT%\tools\max\PT_ASE_Skin.cs"     "%OUT%\3dsMax\" >nul || goto :fail
 python "%ROOT%\tools\build_blender_addon.py" || goto :fail
 copy /y "%ROOT%\tools\dist\pt_ase_importer.zip" "%OUT%\Blender\" >nul || goto :fail
 copy /y "%~dp0README_release.txt" "%OUT%\README.txt" >nul || goto :fail

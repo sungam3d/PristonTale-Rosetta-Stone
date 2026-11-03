@@ -35,7 +35,7 @@ same bones, skin and animation.
    `Field\` for maps, `char\monster\` for monsters, `char\tmABCD\` for characters,
    `image\Sinimage\Items\DropItem\` for weapons and items.
 2. **Install the plug-in** for your program:
-   - **3ds Max 2020 or newer:** copy the three files from `3dsMax\` into `<3ds Max>\scripts\startup\` and restart Max.
+   - **3ds Max 2020 or newer:** copy the four files from `3dsMax\` into `<3ds Max>\scripts\startup\` and restart Max.
    - **Blender 4.2 or newer:** Edit → Preferences → Get Extensions → ⌄ → Install from Disk… → `Blender\pt_ase_importer.zip`.
 3. **Import** the `.ase` files. Characters and monsters come in animated: pick a motion from the PT Motions list
    (3ds Max) or the PT tab (Blender) and press play.

@@ -19,17 +19,22 @@
 global PTASE_Export
 global PTASE_TexOutDir = undefined     -- when set, textures are copied here (next to the .ase)
 global PTASE_TexCopied = undefined
+global PTASE_HasRest = false           -- some exported prop carries its file's pivot (pt_rest)
 
 -- texture path written into the ASE; copies the file next to the .ase when enabled
 fn PTASE_TexPath fname =
 (
     if fname == undefined or fname == "" do return ""
-    if PTASE_TexOutDir == undefined or not doesFileExist fname do return fname
-    local nm = filenameFromPath fname
+    -- scrambled game textures were decoded into %TEMP%\pt_texture_cache: the game's own file
+    local orig = fname
+    if PTASE_Asm != undefined do orig = (PTASE_Asm.CreateInstance "PTAse.TexInfo").Original fname
+    local src = if doesFileExist orig then orig else fname
+    if PTASE_TexOutDir == undefined or not doesFileExist src do return orig
+    local nm = filenameFromPath orig
     local dst = pathConfig.appendPath PTASE_TexOutDir nm
     if not (hasDictValue PTASE_TexCopied (toLower nm)) do
     (
-        if (toLower fname) != (toLower dst) do (deleteFile dst; copyFile fname dst)
+        if (toLower src) != (toLower dst) do (deleteFile dst; copyFile src dst)
         PTASE_TexCopied[toLower nm] = dst
     )
     dst
@@ -116,6 +121,8 @@ fn PTASE_WriteStd ss mat ind tag idx =
     local bms = PTASE_CollectBitmaps mat.diffuseMap #()
     for k = 1 to bms.count do
         PTASE_WriteMap ss i2 (if k == 1 then "*MAP_DIFFUSE" else "*MAP_SELFILLUM") bms[k] (if k == 1 then 1 else 5)
+    -- layers of a material without a texture of its own sit in the self-illumination slot
+    for bm in (PTASE_CollectBitmaps mat.selfIllumMap #()) do PTASE_WriteMap ss i2 "*MAP_SELFILLUM" bm 5
     if mat.opacityMap != undefined do
     (
         local ob = PTASE_CollectBitmaps mat.opacityMap #()
@@ -164,10 +171,19 @@ fn PTASE_WriteMapBlock ss m ch ind =
     )
 )
 
-fn PTASE_WriteTM ss node ind =
+-- "r00 r01 ... r32" (12 numbers, a user property) -> matrix3, or undefined
+fn PTASE_RowsMatrix s =
+(
+    if s == undefined do return undefined
+    local v = for x in (filterString (s as string) " \t") collect (x as float)
+    if v.count < 12 or (for x in v where x == undefined collect x).count > 0 do return undefined
+    matrix3 [v[1], v[2], v[3]] [v[4], v[5], v[6]] [v[7], v[8], v[9]] [v[10], v[11], v[12]]
+)
+
+fn PTASE_WriteTM ss node ind rest:undefined =
 (
     local w = PTASE_Writer()
-    local tm = node.transform
+    local tm = if rest != undefined then rest else node.transform
     local i2 = ind + "\t"
     format "%*NODE_TM {\n" ind to:ss
     format "%*NODE_NAME %\n" i2 (w.q node.name) to:ss
@@ -190,8 +206,15 @@ fn PTASE_WriteTM ss node ind =
 
 fn PTASE_SkinOf node = (local r = undefined; for m in node.modifiers where classof m == Skin do r = m; r)
 
+-- (through the SDK when PT_ASE_Skin.cs compiled: skinOps needs the Modify panel, a second per mesh)
 fn PTASE_SkinBones node sk =
 (
+    if PTASE_SkinSdk != undefined do
+    (
+        local hs = try (PTASE_SkinSdk.Bones node.inode.handle) catch (undefined)
+        if hs != undefined and hs != "" do
+            return (for h in (filterString hs " ") collect maxOps.getNodeByHandle (h as integer))
+    )
     max modify mode
     select node
     modPanel.setCurrentObject sk
@@ -201,6 +224,17 @@ fn PTASE_SkinBones node sk =
 -- bone name per vertex (strongest weight), joined with "|" for the C# writer
 fn PTASE_SkinPhysique node sk =
 (
+    if PTASE_SkinSdk != undefined do
+    (
+        local joined = try (PTASE_SkinSdk.Physique node.inode.handle) catch (undefined)
+        if joined != undefined do
+        (
+            local names = filterString joined "|" splitEmptyTokens:true
+            local missing = 0
+            for n in names where n == "" do missing += 1
+            return #(names, missing)
+        )
+    )
     max modify mode
     select node
     modPanel.setCurrentObject sk
@@ -252,6 +286,49 @@ fn PTASE_RowsString tm =
     s
 )
 
+-- Key times of a node's own animation: the keys of linear controllers (the game interpolates
+-- linearly between keys too), every frame for anything else (Bezier, TCB, Euler XYZ, constraints,
+-- Biped ...).  #() = not animated.
+fn PTASE_KeyTimes node =
+(
+    local times = #()
+    local every = false
+    for c in #(node.position.controller, node.rotation.controller, node.scale.controller) where c != undefined do
+    (
+        local cls = classof c
+        if cls == Linear_Position or cls == Linear_Rotation or cls == Linear_Scale then
+            (for k in c.keys do appendIfUnique times k.time)
+        else if (try ((numKeys c) != 0) catch (false)) do every = true
+    )
+    if every or (times.count == 0 and node.isAnimated) do
+        for f = animationRange.start.frame to animationRange.end.frame do appendIfUnique times (f as time)
+    sort times
+)
+
+-- one key per time: the node relative to `par` (undefined = world), as the game reads it
+fn PTASE_Keys rw node par times =
+(
+    local hasScale = false
+    try (hasScale = (numKeys node.scale.controller) != 0) catch ()
+    rw.BeginTrack hasScale
+    -- linear controllers under the parent the game sees: their own values (world matrices of
+    -- map props and rigs far from the origin lose ~0.004 in 32-bit floats)
+    local direct = par == node.parent and classof node.position.controller == Linear_Position and \
+                   classof node.rotation.controller == Linear_Rotation and classof node.scale.controller == Linear_Scale
+    for t in times do
+    (
+        local tm = at time t
+        (
+            if direct then (scaleMatrix node.scale.controller.value) * (node.rotation.controller.value as matrix3) * \
+                           (transMatrix node.position.controller.value)
+            else if par != undefined then node.transform * inverse par.transform
+            else node.transform
+        )
+        rw.Key (t as integer) tm.row1.x tm.row1.y tm.row1.z tm.row2.x tm.row2.y tm.row2.z \
+               tm.row3.x tm.row3.y tm.row3.z tm.row4.x tm.row4.y tm.row4.z
+    )
+)
+
 -- bones + their animation.  anim: #auto (a model's own keys, i.e. monsters - not a shared player
 -- class animation), #always, #never
 fn PTASE_WriteBones ss bones anim:#auto =
@@ -264,33 +341,32 @@ fn PTASE_WriteBones ss bones anim:#auto =
         if rows == undefined do rows = at time animationRange.start (PTASE_RowsString b.transform)
         local src = getUserProp b "pt_anim"
         local want = anim == #always or (anim == #auto and (src == undefined or (src as string) != "shared"))
-        local times = #()
-        if want do
-        (
-            local ctrls = #(b.position.controller, b.rotation.controller, b.scale.controller)
-            for c in ctrls where c != undefined do
-                try (for k in c.keys do appendIfUnique times k.time) catch ()
-            if times.count == 0 and b.isAnimated do
-                for f = animationRange.start.frame to animationRange.end.frame do append times (f as time)
-            sort times
-        )
+        -- the parent the game sees: another bone only (not the importer's scaling helper)
+        local par = if b.parent != undefined and (findItem bones b.parent) > 0 then b.parent else undefined
+        local times = if want then PTASE_KeyTimes b else #()
         local withTrack = times.count > 0
         if withTrack do
         (
-            local hasScale = false
-            try (hasScale = (numKeys b.scale.controller) > 0) catch ()
-            rw.BeginTrack hasScale
-            for t in times do
-            (
-                local tm = at time t (if b.parent != undefined then b.transform * inverse b.parent.transform else b.transform)
-                rw.Key (t as integer) tm.row1.x tm.row1.y tm.row1.z tm.row2.x tm.row2.y tm.row2.z \
-                       tm.row3.x tm.row3.y tm.row3.z tm.row4.x tm.row4.y tm.row4.z
-            )
+            PTASE_Keys rw b par times
             animated += 1
         )
-        format "%" (rw.Bone b.name (if b.parent != undefined then b.parent.name else "") (rows as string) withTrack) to:ss
+        format "%" (rw.Bone b.name (if par != undefined then par.name else "") (rows as string) withTrack) to:ss
     )
     animated
+)
+
+-- Where a node is written (its NODE_TM; the vertices go along).  The game keeps a moving prop's
+-- vertices relative to its NODE_TM and plays the keys from there, so any pivot gives the same
+-- result: a prop the importer animated is written at the pivot its file had (user prop pt_rest),
+-- the objects hanging from it at their offset from that.  undefined = as it stands.
+fn PTASE_RestWorld node exportedSet depth:0 =
+(
+    local r = PTASE_RowsMatrix (getUserProp node "pt_rest")
+    if r != undefined do return r
+    local p = node.parent
+    if p == undefined or (findItem exportedSet p) == 0 or depth > 100 do return undefined
+    local pr = PTASE_RestWorld p exportedSet depth:(depth + 1)
+    if pr == undefined then undefined else node.transform * (inverse p.transform) * pr
 )
 
 fn PTASE_WriteGeom ss node matIndex exportedSet skinData:undefined =
@@ -303,9 +379,36 @@ fn PTASE_WriteGeom ss node matIndex exportedSet skinData:undefined =
     if sk != undefined do sk.enabled = true
     format "*GEOMOBJECT {\n" to:ss
     format "\t*NODE_NAME %\n" (w.q node.name) to:ss
-    if skinData == undefined and node.parent != undefined and (findItem exportedSet node.parent) > 0 do
-        format "\t*NODE_PARENT %\n" (w.q node.parent.name) to:ss
-    PTASE_WriteTM ss node "\t"
+    local par = undefined
+    if skinData == undefined and node.parent != undefined and (findItem exportedSet node.parent) > 0 then
+    (
+        par = node.parent
+        format "\t*NODE_PARENT %\n" (w.q par.name) to:ss
+    )
+    else if skinData != undefined do
+    (
+        -- a skinned mesh is not parented in 3ds Max: the parent its file gave it, if exported
+        local pp = getUserProp node "pt_parent"
+        if pp != undefined and (for n in exportedSet where n.name == (pp as string) collect n).count > 0 do
+            format "\t*NODE_PARENT %\n" (w.q (pp as string)) to:ss
+    )
+    local rest = if skinData == undefined and PTASE_HasRest then PTASE_RestWorld node exportedSet else undefined
+    if rest != undefined do
+    (
+        local tm = node.transform
+        local d = 0.0
+        for k = 1 to 4 do d = amax d (distance rest[k] tm[k])
+        if d < 1e-6 then rest = undefined
+        else
+        (
+            -- from object space (small numbers): one 32-bit rounding at map coordinates, not three
+            delete m
+            m = copy node.mesh
+            local mv = (node.objectTransform * inverse tm) * rest
+            for i = 1 to getNumVerts m do setVert m i ((getVert m i) * mv)
+        )
+    )
+    PTASE_WriteTM ss node "\t" rest:rest
     local nv = getNumVerts m, nf = getNumFaces m
     format "\t*MESH {\n\t\t*TIMEVALUE 0\n\t\t*MESH_NUMVERTEX %\n\t\t*MESH_NUMFACES %\n" nv nf to:ss
     format "\t\t*MESH_VERTEX_LIST {\n" to:ss
@@ -347,19 +450,33 @@ fn PTASE_WriteGeom ss node matIndex exportedSet skinData:undefined =
         format "\t\t}\n" to:ss
     )
     format "\t}\n\t*PROP_MOTIONBLUR 0\n\t*PROP_CASTSHADOW 1\n\t*PROP_RECVSHADOW 1\n" to:ss
+    -- a moving prop (windmill, door): its own keys, relative to the parent the game sees
+    if skinData == undefined and PTASE_Asm != undefined do
+    (
+        local times = PTASE_KeyTimes node
+        if times.count > 0 do
+        (
+            local rw = PTASE_Asm.CreateInstance "PTAse.RigWriter"
+            PTASE_Keys rw node par times
+            format "%" (rw.Track node.name) to:ss
+        )
+    )
     if matIndex >= 0 then format "\t*MATERIAL_REF %\n" matIndex to:ss
     else
     (
         local wc = (node.wirecolor as point3) / 255.0
         format "\t*WIREFRAME_COLOR %\n" (w.p3 wc) to:ss
     )
-    if skinData != undefined do
+    if skinData != undefined then
     (
         local rw = PTASE_Asm.CreateInstance "PTAse.RigWriter"
         local joined = ""
         for i = 1 to skinData.count do joined += (if i > 1 then "|" else "") + skinData[i]
         format "%" (rw.Physique joined) to:ss
     )
+    -- a rigid part of a character keeps its empty *PHYSIQUE (it marks a mesh, not a bone)
+    else if (getUserProp node "pt_physique") as string == "empty" do
+        format "\t*PHYSIQUE {\n\t\t*PHYSIQUE_NUMVERTEXASSIGNMENT\t0\n\t}\n" to:ss
     format "}\n" to:ss
     delete m
 )
@@ -383,12 +500,14 @@ fn PTASE_Export path nodes:undefined copyTextures:true skeleton:true anim:#auto 
     PTASE_TexOutDir = if copyTextures then getFilenamePath path else undefined
     PTASE_TexCopied = Dictionary #string
     local t0 = timestamp()
+    -- the C# helpers: bones, keys, the game's texture names
+    local helpers = try (PTASE_Compile()) catch (false)
     if nodes == undefined do nodes = if selection.count > 0 then (selection as array) else (objects as array)
     local geoms = for n in nodes where (superclassof n == GeometryClass and canConvertTo n TriMeshGeometry and not n.isHidden) collect n
     local lights = for n in nodes where (superclassof n == Light and classof n == Omnilight) collect n
     -- characters / monsters: skinned meshes and their skeletons (selecting a PT bone exports its skinned meshes too)
     local skinned = #(), bones = #()
-    if skeleton and PTASE_Compile() do
+    if skeleton and helpers do
     (
         local selRigs = #()
         for n in nodes do (local r = getUserProp n "pt_rig"; if r != undefined and r != "" do appendIfUnique selRigs (r as string))
@@ -404,6 +523,8 @@ fn PTASE_Export path nodes:undefined copyTextures:true skeleton:true anim:#auto 
         -- material-less PT bone meshes must not be written twice
         geoms = for g in geoms where (findItem bones g) == 0 collect g
     )
+    PTASE_HasRest = false
+    for g in geoms while not PTASE_HasRest do PTASE_HasRest = getUserProp g "pt_rest" != undefined
     local mats = #()
     for g in geoms where g.material != undefined do appendIfUnique mats g.material
     local ss = stringStream ""
@@ -425,7 +546,8 @@ fn PTASE_Export path nodes:undefined copyTextures:true skeleton:true anim:#auto 
     for i = 1 to mats.count do PTASE_WriteMaterial ss mats[i] (i - 1)
     format "}\n" to:ss
     local unassigned = 0
-    for g in geoms do
+    -- objects as they stand at the start of the animation (moving props: their keys follow)
+    at time animationRange.start for g in geoms do
     (
         local sk = PTASE_SkinOf g
         local phys = undefined
@@ -433,6 +555,14 @@ fn PTASE_Export path nodes:undefined copyTextures:true skeleton:true anim:#auto 
         (
             local r = PTASE_SkinPhysique g sk
             phys = r[1]
+            -- vertices the imported file had without a bone stay so (same mesh: same vertex count)
+            local none = getUserProp g "pt_unassigned"
+            if none != undefined do
+            (
+                local p = filterString (none as string) ": "
+                if p.count > 1 and (p[1] as integer) == phys.count do
+                    for k = 2 to p.count do (local v = (p[k] as integer) + 1; if v >= 1 and v <= phys.count do phys[v] = "")
+            )
             unassigned += r[2]
         )
         PTASE_WriteGeom ss g ((findItem mats g.material) - 1) (geoms + bones) skinData:phys
