@@ -20,8 +20,8 @@ QUICK START
    Keep the output folder together - the .ase files need the textures folder
    and, for player armour/heads, the m1_motions.ase ... m8_motions.ase files.
 
-   The whole game folder (Convert: "Whole game folder", picked by itself when
-   you drop the game folder) gives, in the game's own folder layout:
+   Drop the whole game folder (or any folder with sounds, text or .inx in it)
+   and every kind of file is converted, in the game's own folder layout:
      .smd -> .ase    .bmp/.tga -> normal images    .wav -> playable (.bgm -> .wav)
      .inf .ini .in .sin .msg .txt .lua -> UTF-8 text
      .inx (monster/NPC/player model info) -> the .ini/.inf/.in it was built from

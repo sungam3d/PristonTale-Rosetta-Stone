@@ -140,7 +140,7 @@ Just want to try it? <b>Scripting → Run Script…</b> → <code>PT_ASE_Importe
   <tr><td>Split maps into separate objects</td><td>Cuts a map into separate objects (buildings, trees, terrain…), close to
       how the original <code>.ase</code> files were made. Untick it to get the whole map as one mesh.</td></tr>
   <tr><td>Collision walls</td><td>The invisible walls of a map: <i>separate object</i> (easy to hide), <i>keep in mesh</i>, or <i>remove</i>.</td></tr>
-  <tr><td>Convert</td><td><i>Every .smd model and map</i>, <i>Terrain maps only</i>, <i>Objects, characters, monsters</i> (skips map terrain), or <i>Whole game folder</i> (below).</td></tr>
+  <tr><td>Also save the model info for the server</td><td>Only for the whole game folder (below): a <code>_server</code> copy of the model info in the game's Korean code page.</td></tr>
 </table></div>
 <div class="note"><b>Keep the output folder together.</b> The <code>.ase</code> files need the <code>textures</code> folder.
 Player armour and heads also need their class animation file (<code>m1_motions.ase</code> … <code>m8_motions.ase</code>),
@@ -149,7 +149,7 @@ which the converter writes into the same folder.</div>
 Run <code>smd2ase.exe --help</code> for every option.</p>
 
 <h3>The whole game folder</h3>
-<p>Drop the whole Priston Tale folder onto the window and <b>Convert</b> switches to <i>Whole game folder</i> by itself.
+<p>Drop the whole Priston Tale folder onto the window (or any folder with sounds, text or <code>.inx</code> files in it): there is nothing to pick, every kind of file is converted.
 Everything comes out readable, in the game's own folder layout:</p>
 <div class="table-wrap"><table>
   <tr><th>Game file</th><th>Becomes</th></tr>
@@ -161,10 +161,10 @@ Everything comes out readable, in the game's own folder layout:</p>
       <code>.inf</code> / <code>.in</code> it was made from: model files, detail levels, and every animation with its frames and key events</td></tr>
   <tr><td><code>_server\</code></td><td>The model info files again in the game's Korean code page: the form the server reads</td></tr>
 </table></div>
-<p>The ticks under <b>Convert</b> leave kinds of file out. <b>Back to game format…</b> goes the other way for files you edited:
+<p><b>Back to game format…</b> goes the other way for files you edited:
 <code>.ini</code> / <code>.inf</code> / <code>.in</code> → <code>.inx</code>, <code>.wav</code>, <code>.bmp</code> and <code>.tga</code> → the game's own headers,
 written to <code>game_format</code> in the output folder. Keep the game's folder names (<code>char\monster\…</code>): an <code>.inx</code> stores a checksum of its own path.</p>
-<figure><img src="Guide_images/convert_whole.png" alt="Converter set to the whole game folder"></figure>
+<figure><img src="Guide_images/convert_whole.png" alt="Converter with the whole game folder dropped in"></figure>
 
 <!-- ============================================================ IMPORT -->
 <h2 id="import">4. Import into 3ds Max</h2>

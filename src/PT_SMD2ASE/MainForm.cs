@@ -21,9 +21,7 @@ namespace PT_SMD2ASE
         readonly TextBox outBox;
         readonly CheckBox chkTex, chkVc, chkLights, chkSplit, chkOk;
         readonly RadioButton rbSplit, rbKeep, rbDrop;
-        readonly ComboBox cmbWhat;
-        readonly CheckBox chkModels, chkSounds, chkText, chkInfo, chkServer;
-        readonly FlowLayoutPanel clientRow;
+        readonly CheckBox chkServer;
         readonly TableLayoutPanel plugRows;
         readonly Panel warn;
         readonly Label warnLbl, status;
@@ -33,8 +31,8 @@ namespace PT_SMD2ASE
 
         List<string> pending = new List<string>();
         ClientConvert.Scan scan;                // whole game folder mode: what was dropped
-        bool needConfirm, switching;
-        const int WholeFolder = 3;              // cmbWhat index of "Whole game folder"
+        bool needConfirm;
+        bool whole;                             // what was dropped needs the whole-folder conversion
         CancellationTokenSource cts;
         Task worker;
 
@@ -125,37 +123,12 @@ namespace PT_SMD2ASE
             if (!rbKeep.Checked && !rbDrop.Checked) rbSplit.Checked = true;
             coll.Controls.AddRange(new Control[] { rbSplit, rbKeep, rbDrop });
             opt.Controls.Add(coll, 1, 3);
-            opt.Controls.Add(new Label { Text = "Convert:", AutoSize = true, Margin = new Padding(3, 7, 3, 3) }, 0, 4);
-            cmbWhat = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 360 };
-            cmbWhat.Items.AddRange(new object[] { "Every .smd model and map", "Terrain maps only", "Objects, characters, monsters",
-                                                  "Whole game folder (models, textures, sounds, text, model info)" });
-            cmbWhat.SelectedIndex = Math.Max(0, Math.Min(WholeFolder, st.What));
-            cmbWhat.SelectedIndexChanged += (s, e) =>
-            {
-                clientRow.Visible = cmbWhat.SelectedIndex == WholeFolder;
-                if (!switching && inputs.Length > 0 && !Busy) ShowSelection();
-            };
-            opt.Controls.Add(cmbWhat, 1, 4);
-            // whole game folder: which kinds of file
-            clientRow = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, Dock = DockStyle.Fill, Margin = new Padding(0, 2, 0, 0) };
-            chkModels = new CheckBox { Text = "Models → .ase", AutoSize = true, Checked = st.Models };
-            chkSounds = new CheckBox { Text = "Sounds → playable .wav", AutoSize = true, Checked = st.Sounds };
-            chkText = new CheckBox { Text = "Korean text → UTF-8", AutoSize = true, Checked = st.Text };
-            chkInfo = new CheckBox { Text = "Model info .inx → .ini", AutoSize = true, Checked = st.ModelInfo };
-            chkServer = new CheckBox { Text = "Server copy (_server)", AutoSize = true, Checked = st.ServerCopy };
-            var tips = new ToolTip { AutoPopDelay = 20000 };
-            tips.SetToolTip(chkSounds, "The game's sound effects have a scrambled header (JODO instead of RIFF). Music (.bgm) is saved as .wav.");
-            tips.SetToolTip(chkText, ".inf .ini .in .sin .msg .txt .lua ... are Korean (code page 949). The copies are UTF-8, readable in any editor.");
-            tips.SetToolTip(chkInfo, "Each compiled .inx (monster / NPC / player model info: model files, detail levels,\n" +
-                                     "animation frames and key events) is rebuilt as the .ini / .inf / .in text it was made from.");
-            tips.SetToolTip(chkServer, "<output>\\_server holds the model info files again in the game's own Korean code page:\nthe form the server and the game's tools read.");
-            foreach (var c in new CheckBox[] { chkModels, chkSounds, chkText, chkInfo, chkServer })
-            {
-                c.CheckedChanged += (s, e) => { if (!switching && scan != null && !Busy) ShowSelection(); };
-                clientRow.Controls.Add(c);
-            }
-            clientRow.Visible = cmbWhat.SelectedIndex == WholeFolder;
-            opt.Controls.Add(clientRow, 1, 5);
+            chkServer = new CheckBox { Text = "Also save the model info for the server (_server folder, Korean code page)", AutoSize = true, Checked = st.ServerCopy };
+            new ToolTip { AutoPopDelay = 20000 }.SetToolTip(chkServer,
+                "<output>\\_server holds the model info files (.ini / .inf / .in made from each .inx) again in the game's own\n" +
+                "Korean code page: the form the server and the game's tools read.");
+            chkServer.CheckedChanged += (s, e) => { if (scan != null && !Busy) ShowSelection(); };
+            opt.Controls.Add(chkServer, 0, 4); opt.SetColumnSpan(chkServer, 2);
             opGrp.Controls.Add(opt);
             root.Controls.Add(opGrp);
 
@@ -309,7 +282,7 @@ namespace PT_SMD2ASE
 
         void UpdateButtons()
         {
-            bool any = Whole ? scan != null && scan.Files.Count > 0 : pending.Count > 0;
+            bool any = whole ? scan != null && scan.Files.Count > 0 : pending.Count > 0;
             bool can = any && !Busy && (!needConfirm || chkOk.Checked);
             btnGo.Enabled = can;
             btnCancel.Enabled = Busy;
@@ -370,15 +343,6 @@ namespace PT_SMD2ASE
             ShowSelection();
         }
 
-        bool Whole => cmbWhat.SelectedIndex == WholeFolder;
-
-        void SetMode(int index)
-        {
-            switching = true;
-            cmbWhat.SelectedIndex = index;
-            switching = false;
-        }
-
         void ShowSelection()
         {
             pending = Batch.Collect(inputs);
@@ -386,18 +350,16 @@ namespace PT_SMD2ASE
             chkOk.Checked = false;
             needConfirm = false;
             warn.Visible = false;
-            // the whole game folder, or files only the whole-folder mode converts: switch to it
+            // the game folder, or anything with sounds, text or model info in it: convert every kind of file;
+            // only .smd (and their textures): the model conversion
             bool gameFolder = inputs.Any(p => Directory.Exists(p) && ClientConvert.LooksLikeClient(p));
-            if (!Whole && (gameFolder || pending.Count == 0))
-            {
-                var sc = ClientConvert.ScanInputs(inputs);
-                if (gameFolder || sc.HasClientFiles) { SetMode(WholeFolder); scan = sc; }
-            }
-            if (Whole) { ShowClientSelection(); return; }
+            var sc = ClientConvert.ScanInputs(inputs);
+            whole = gameFolder || sc.HasClientFiles || (pending.Count == 0 && sc.Files.Count > 0);
+            if (whole) { scan = sc; ShowClientSelection(); return; }
             if (pending.Count == 0)
             {
-                SetDropText("No .smd files found in what you dropped.");
-                Log("No .smd files found in: " + string.Join("; ", inputs), Warn);
+                SetDropText("Nothing to convert in what you dropped.");
+                Log("No game files found in: " + string.Join("; ", inputs), Warn);
                 UpdateButtons();
                 return;
             }
@@ -427,8 +389,7 @@ namespace PT_SMD2ASE
 
         ClientSettings ClientOptions() => new ClientSettings
         {
-            OutDir = OutDir, Models = chkModels.Checked, Textures = chkTex.Checked, Sounds = chkSounds.Checked,
-            Text = chkText.Checked, ModelInfo = chkInfo.Checked, ServerCopy = chkServer.Checked && chkInfo.Checked,
+            OutDir = OutDir, Textures = chkTex.Checked, ServerCopy = chkServer.Checked,
         };
 
         void ShowClientSelection()
@@ -446,7 +407,7 @@ namespace PT_SMD2ASE
             Part(c.ModelInfo, ClientConvert.FileKind.ModelInfo, "model info files");
             if (parts.Count == 0)
             {
-                SetDropText("Nothing to convert in what you dropped (with the options ticked).");
+                SetDropText("Nothing to convert in what you dropped.");
                 UpdateButtons();
                 return;
             }
@@ -525,7 +486,7 @@ namespace PT_SMD2ASE
         // ------------------------------------------------------------- conversion
         void Start()
         {
-            if (Whole) { StartClient(); return; }
+            if (whole) { StartClient(); return; }
             if (pending.Count == 0 || Busy || (needConfirm && !chkOk.Checked)) return;
             string outDir = OutDir;
             try { Directory.CreateDirectory(outDir); }
@@ -537,8 +498,6 @@ namespace PT_SMD2ASE
             {
                 OutDir = outDir,
                 Textures = chkTex.Checked,
-                StagesOnly = cmbWhat.SelectedIndex == 1,
-                ModelsOnly = cmbWhat.SelectedIndex == 2,
             };
             s.Template.SplitCollision = !rbKeep.Checked;
             s.Template.DropCollision = rbDrop.Checked;
@@ -677,9 +636,7 @@ namespace PT_SMD2ASE
             st.Lights = chkLights.Checked;
             st.SplitObjects = chkSplit.Checked;
             st.Collision = rbKeep.Checked ? "keep" : rbDrop.Checked ? "drop" : "split";
-            st.What = cmbWhat.SelectedIndex;
-            st.Models = chkModels.Checked; st.Sounds = chkSounds.Checked; st.Text = chkText.Checked;
-            st.ModelInfo = chkInfo.Checked; st.ServerCopy = chkServer.Checked;
+            st.ServerCopy = chkServer.Checked;
             if (WindowState == FormWindowState.Normal) { st.Width = ClientSize.Width; st.Height = ClientSize.Height; }
             st.Save();
         }
@@ -707,7 +664,6 @@ namespace PT_SMD2ASE
         public bool TestBusy => Busy;
         public string TestStatus => status.Text;
         public void TestSetOut(string d) => outBox.Text = d;
-        public int TestMode => cmbWhat.SelectedIndex;
-        public void TestSetMode(int i) => cmbWhat.SelectedIndex = i;
+        public bool TestWhole => whole;
     }
 }

@@ -56,9 +56,9 @@ namespace PT_SMD2ASE
             {
                 switch (step)
                 {
-                    case 0: f.TestSetOut(outDir); f.TestSetMode(0); Shot("cs_gui_0_start.png"); f.TestInput(new[] { folder }); step++; break;
+                    case 0: f.TestSetOut(outDir); Shot("cs_gui_0_start.png"); f.TestInput(new[] { folder }); step++; break;
                     case 1:
-                        report.AppendLine("folder: warning=" + f.TestWarningVisible + " convertEnabled=" + f.TestConvertEnabled);
+                        report.AppendLine("folder: whole=" + f.TestWhole + " warning=" + f.TestWarningVisible + " convertEnabled=" + f.TestConvertEnabled);
                         f.TestConvert();                                            // must be ignored (not ticked)
                         report.AppendLine("convert before tick started=" + f.TestBusy);
                         Shot("cs_gui_1_warning.png");
@@ -82,7 +82,7 @@ namespace PT_SMD2ASE
                         step = 6;
                         goto case 6;
                     case 4:
-                        report.AppendLine("game folder: mode=" + f.TestMode + " warning=" + f.TestWarningVisible + " convertEnabled=" + f.TestConvertEnabled);
+                        report.AppendLine("game folder: whole=" + f.TestWhole + " warning=" + f.TestWarningVisible + " convertEnabled=" + f.TestConvertEnabled);
                         Shot("cs_gui_4_client.png");
                         f.TestTick();
                         f.TestConvert();
