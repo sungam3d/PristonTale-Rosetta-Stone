@@ -13,11 +13,11 @@ namespace PT_SMD2ASE
 {
     public class MainForm : Form
     {
-        const string AppName = "PT SMD → ASE Converter";
+        const string AppName = "PristonTale - Rosetta Stone";
         const double MbPerSec = 15.0;       // measured: whole client (440 MB of SMD) in ~25 s incl. textures
 
         readonly Settings st = Settings.Load();
-        readonly Label drop;
+        readonly Label drop, dropEnc;          // decode (game -> readable), encode (readable -> game)
         readonly TextBox outBox;
         readonly CheckBox chkTex, chkVc, chkLights, chkSplit, chkOk;
         readonly RadioButton rbSplit, rbKeep, rbDrop;
@@ -36,7 +36,8 @@ namespace PT_SMD2ASE
         CancellationTokenSource cts;
         Task worker;
 
-        static readonly Color DropBack = Color.FromArgb(238, 243, 251), DropHot = Color.FromArgb(214, 230, 252);
+        static readonly Color DropBack = Color.FromArgb(238, 243, 251), DropHot = Color.FromArgb(214, 230, 252),
+                              EncBack = Color.FromArgb(251, 244, 235), EncHot = Color.FromArgb(252, 230, 206);
 
         public MainForm(string[] initial)
         {
@@ -49,12 +50,11 @@ namespace PT_SMD2ASE
             StartPosition = FormStartPosition.CenterScreen;
             AllowDrop = true;
             DragEnter += OnDragEnter;
-            DragLeave += (s, e) => drop.BackColor = DropBack;
+            DragLeave += (s, e) => { drop.BackColor = DropBack; dropEnc.BackColor = EncBack; };
             DragDrop += OnDragDrop;
 
             var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, Padding = new Padding(10) };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 120));   // drop
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));         // browse
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 200));   // decode / encode drop zones + browse buttons
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));         // output
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));         // options
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));         // plug-ins
@@ -64,30 +64,21 @@ namespace PT_SMD2ASE
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));     // log
             Controls.Add(root);
 
-            // drop zone
-            drop = new Label
-            {
-                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, BackColor = DropBack,
-                ForeColor = Color.FromArgb(43, 74, 122), Font = new Font("Segoe UI", 13f), BorderStyle = BorderStyle.FixedSingle,
-                Cursor = Cursors.Hand, AllowDrop = true, Margin = new Padding(0, 0, 0, 6),
-            };
-            drop.DragEnter += OnDragEnter;
-            drop.DragLeave += (s, e) => drop.BackColor = DropBack;
-            drop.DragDrop += OnDragDrop;
-            drop.Click += (s, e) => BrowseFiles();
+            // drop zones: decode (left), encode (right), each with its browse buttons
+            var zones = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Margin = new Padding(0, 0, 0, 4) };
+            zones.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            zones.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            zones.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            zones.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            drop = MakeZone(false);
+            dropEnc = MakeZone(true);
+            zones.Controls.Add(drop, 0, 0);
+            zones.Controls.Add(dropEnc, 1, 0);
+            zones.Controls.Add(BrowseRow(false), 0, 1);
+            zones.Controls.Add(BrowseRow(true), 1, 1);
             SetDropText(null);
-            root.Controls.Add(drop);
-
-            var browse = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false };
-            browse.Controls.Add(MakeButton("Browse file(s)…", (s, e) => BrowseFiles()));
-            browse.Controls.Add(MakeButton("Browse folder…", (s, e) => BrowseFolder()));
-            var toGame = MakeButton("Back to game format…", (s, e) => BackToGame());
-            toGame.Margin = new Padding(24, 3, 3, 3);
-            new ToolTip().SetToolTip(toGame, "Edited files back into the forms the game uses:\n" +
-                ".ini / .inf / .in → .inx (+ Korean code page text), .wav → game sound header,\n" +
-                ".bmp / .tga → game texture header. Written to <output folder>\\game_format.");
-            browse.Controls.Add(toGame);
-            root.Controls.Add(browse);
+            SetEncText(null);
+            root.Controls.Add(zones);
 
             // output folder
             var outGrp = new GroupBox { Text = "Output folder", Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(6) };
@@ -259,12 +250,59 @@ namespace PT_SMD2ASE
             return b;
         }
 
+        Label MakeZone(bool enc)
+        {
+            var z = new Label
+            {
+                Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, BackColor = enc ? EncBack : DropBack,
+                ForeColor = enc ? Color.FromArgb(122, 70, 20) : Color.FromArgb(43, 74, 122), Font = new Font("Segoe UI", 10.5f),
+                BorderStyle = BorderStyle.FixedSingle, Cursor = Cursors.Hand, AllowDrop = true,
+                Margin = enc ? new Padding(5, 0, 0, 0) : new Padding(0, 0, 5, 0),
+            };
+            z.DragEnter += OnDragEnter;
+            z.DragLeave += (s, e) => z.BackColor = enc ? EncBack : DropBack;
+            z.DragDrop += OnDragDrop;
+            z.Click += (s, e) => BrowseFiles(enc);
+            new ToolTip { AutoPopDelay = 20000 }.SetToolTip(z, enc
+                ? "Edited files back into the forms the game uses:\n.ini / .inf / .in → .inx (+ Korean code page text), " +
+                  ".wav → game sound header,\n.bmp / .tga → game texture header, other UTF-8 text → Korean code page.\n" +
+                  "Written to <output folder>\\game_format. Keep the game's folder names (char\\monster\\...)."
+                : "Game files into forms you can open: .smd → .ase, textures, sounds, Korean text → UTF-8,\n" +
+                  ".inx → .ini / .inf / .in. Written to the output folder in the game's folder layout.");
+            return z;
+        }
+
+        Control BrowseRow(bool enc)
+        {
+            var row = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false,
+                                            Margin = enc ? new Padding(5, 2, 0, 0) : new Padding(0, 2, 5, 0) };
+            row.Controls.Add(MakeButton("Browse file(s)…", (s, e) => BrowseFiles(enc)));
+            row.Controls.Add(MakeButton("Browse folder…", (s, e) => BrowseFolder(enc)));
+            return row;
+        }
+
         string OutDir => string.IsNullOrWhiteSpace(outBox.Text) ? Settings.DefaultOut : outBox.Text.Trim();
         bool Busy => worker != null && !worker.IsCompleted;
 
         void SetDropText(string extra)
         {
-            drop.Text = "⇩  Drop the game folder, any folder, or .smd / .inx / .wav files here  ⇩\n(or click to browse)" + (extra != null ? "\n\n" + extra : "");
+            // (with a selection or result the box shows only that: the half-width box has no room for both)
+            drop.Text = "DECODE   game → readable\n\n" + (extra != null ? Wrap(extra) :
+                        "⇩  Drop the game folder, any folder,\nor .smd / .inx / .wav files here  ⇩\n(or click to browse)");
+        }
+
+        void SetEncText(string extra)
+        {
+            dropEnc.Text = "ENCODE   readable → game\n\n" + (extra != null ? Wrap(extra) :
+                           "⇩  Drop edited .ini / .inf / .in, .wav,\n.bmp / .tga files or folders here  ⇩\n(or click to browse)");
+        }
+
+        // "Selected: x  -  a, b, c" / "Done: a, b, c" -> one item per line
+        static string Wrap(string s)
+        {
+            s = s.Replace("  -  ", "\n");
+            if (s.StartsWith("Done: ")) s = "Done:\n" + s.Substring(6);
+            return s.Replace(", ", "\n");
         }
 
         void Log(string s, Color c)
@@ -294,7 +332,7 @@ namespace PT_SMD2ASE
             if (e.Data.GetDataPresent(DataFormats.FileDrop) && !Busy)
             {
                 e.Effect = DragDropEffects.Copy;
-                drop.BackColor = DropHot;
+                if (sender == dropEnc) dropEnc.BackColor = EncHot; else drop.BackColor = DropHot;
             }
             else e.Effect = DragDropEffects.None;
         }
@@ -302,24 +340,35 @@ namespace PT_SMD2ASE
         void OnDragDrop(object sender, DragEventArgs e)
         {
             drop.BackColor = DropBack;
-            if (e.Data.GetData(DataFormats.FileDrop) is string[] files) BeginInvoke(new Action(() => OnInput(files)));
+            dropEnc.BackColor = EncBack;
+            if (e.Data.GetData(DataFormats.FileDrop) is string[] files)
+                BeginInvoke(new Action(() => { if (sender == dropEnc) OnEncode(files); else OnInput(files); }));
         }
 
-        void BrowseFiles()
+        void BrowseFiles(bool enc)
         {
             if (Busy) return;
-            using (var d = new OpenFileDialog { Title = "Choose game file(s)",
-                                                Filter = "Priston Tale SMD (*.smd)|*.smd|Game files (*.smd;*.inx;*.wav;*.bgm;*.bmp;*.tga;*.inf;*.ini;*.in;*.sin;*.msg)|" +
-                                                         "*.smd;*.inx;*.wav;*.bgm;*.bmp;*.tga;*.inf;*.ini;*.in;*.sin;*.msg|All files (*.*)|*.*",
-                                                Multiselect = true, InitialDirectory = st.LastIn })
-                if (d.ShowDialog(this) == DialogResult.OK) OnInput(d.FileNames);
+            using (var d = enc
+                ? new OpenFileDialog { Title = "Choose edited file(s) to put back into game format",
+                                       Filter = "Edited files (*.ini;*.inf;*.in;*.wav;*.bmp;*.tga;*.sin;*.msg;*.txt)|*.ini;*.inf;*.in;*.wav;*.bmp;*.tga;*.sin;*.msg;*.txt|All files (*.*)|*.*",
+                                       Multiselect = true, InitialDirectory = OutDir }
+                : new OpenFileDialog { Title = "Choose game file(s)",
+                                       Filter = "Game files (*.smd;*.inx;*.wav;*.bgm;*.bmp;*.tga;*.inf;*.ini;*.in;*.sin;*.msg)|" +
+                                                "*.smd;*.inx;*.wav;*.bgm;*.bmp;*.tga;*.inf;*.ini;*.in;*.sin;*.msg|Priston Tale SMD (*.smd)|*.smd|All files (*.*)|*.*",
+                                       Multiselect = true, InitialDirectory = st.LastIn })
+                if (d.ShowDialog(this) == DialogResult.OK) { if (enc) OnEncode(d.FileNames); else OnInput(d.FileNames); }
         }
 
-        void BrowseFolder()
+        void BrowseFolder(bool enc)
         {
             if (Busy) return;
-            using (var d = new FolderBrowserDialog { Description = "Choose the game folder, or any folder below it (searched recursively)", SelectedPath = st.LastIn })
-                if (d.ShowDialog(this) == DialogResult.OK) OnInput(new[] { d.SelectedPath });
+            using (var d = new FolderBrowserDialog
+                   {
+                       Description = enc ? "Choose a folder with edited files. Keep the game's folder names (char\\monster\\...) so each .inx comes out right."
+                                         : "Choose the game folder, or any folder below it (searched recursively)",
+                       SelectedPath = enc ? OutDir : st.LastIn,
+                   })
+                if (d.ShowDialog(this) == DialogResult.OK) { if (enc) OnEncode(new[] { d.SelectedPath }); else OnInput(new[] { d.SelectedPath }); }
         }
 
         void BrowseOut()
@@ -436,33 +485,37 @@ namespace PT_SMD2ASE
             }
         }
 
-        void BackToGame()
+        // encode: edited files -> <output>\game_format, straight away (it is quick)
+        void OnEncode(string[] paths)
         {
-            if (Busy) return;
-            string dir;
-            using (var d = new FolderBrowserDialog { Description = "Choose a folder with edited files (.ini / .inf / .in, .wav, .bmp / .tga). " +
-                                                                  "Keep the game's folder names (char\\monster\\...) so the .inx comes out right.",
-                                                    SelectedPath = OutDir })
+            if (Busy) { Log("Busy - wait for the current conversion to finish.", Warn); return; }
+            string outDir = Path.GetFullPath(Path.Combine(OutDir, "game_format")).TrimEnd('\\');
+            // (dropping the output folder itself must not re-encode an earlier game_format)
+            var files = new List<string>();
+            foreach (var p in paths.Select(Path.GetFullPath))
             {
-                if (d.ShowDialog(this) != DialogResult.OK) return;
-                dir = d.SelectedPath;
+                if (Directory.Exists(p)) files.AddRange(Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories));
+                else if (File.Exists(p)) files.Add(p);
             }
-            string outDir = Path.Combine(OutDir, "game_format");
-            if (string.Equals(Path.GetFullPath(dir).TrimEnd('\\'), Path.GetFullPath(outDir).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return;
-            Log("=== Back to game format: " + dir + " -> " + outDir + " ===", Head);
+            files = files.Where(f => !f.StartsWith(outDir + "\\", StringComparison.OrdinalIgnoreCase)).ToList();
+            string names = Path.GetFileName(paths[0].TrimEnd('\\')) + (paths.Length > 1 ? " (+" + (paths.Length - 1) + " more)" : "");
+            if (files.Count == 0) { SetEncText("Nothing to encode in " + names + "."); return; }
+            SetEncText("Encoding " + names + " …");
+            Log("=== Encoding back to game format: " + files.Count + " file(s) -> " + outDir + " ===", Head);
             cts = new CancellationTokenSource();
             worker = Task.Run(() =>
             {
                 ClientConvert.ToGameResult r;
-                try { r = ClientConvert.ToGame(new[] { dir }, outDir, (line, ok) => BeginInvoke(new Action(() => Log(line, ok ? Ok : Warn)))); }
+                try { r = ClientConvert.ToGame(files, outDir, (line, ok) => BeginInvoke(new Action(() => Log(line, ok ? Ok : Warn)))); }
                 catch (Exception ex) { BeginInvoke(new Action(() => Log("Unexpected error: " + ex.Message, Err))); r = new ClientConvert.ToGameResult(); }
                 BeginInvoke(new Action(() =>
                 {
                     worker = null;
                     Log("=== " + r.Summary() + " ===", r.Failed > 0 ? Err : Head);
                     status.Text = "Done: " + r.Summary();
+                    SetEncText("Done: " + r.Summary());
                     UpdateButtons();
-                    OpenFolder(outDir);
+                    if (!QuietForTests) OpenFolder(outDir);
                 }));
             });
             UpdateButtons();
@@ -665,5 +718,6 @@ namespace PT_SMD2ASE
         public string TestStatus => status.Text;
         public void TestSetOut(string d) => outBox.Text = d;
         public bool TestWhole => whole;
+        public void TestEncode(string[] p) => OnEncode(p);
     }
 }

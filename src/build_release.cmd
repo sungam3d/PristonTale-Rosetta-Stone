@@ -1,8 +1,8 @@
 @echo off
 rem ---------------------------------------------------------------------------
-rem  Builds the release package:  ..\release\PT_SMD2ASE_v<ver>\  + .zip
+rem  Builds the release package:  ..\release\PT_RosettaStone_v<ver>\  + .zip
 rem
-rem    PT_SMD2ASE.exe   - drag & drop converter window   (.NET Framework 4.8, ~100 KB,
+rem    PT_RosettaStone.exe   - drag & drop converter window   (.NET Framework 4.8, ~100 KB,
 rem    smd2ase.exe      - command line converter           runs on every Windows 10/11
 rem                                                         with nothing to install)
 rem    3dsMax\          - ASE importer/exporter for 3ds Max 2020+
@@ -16,14 +16,14 @@ rem ---------------------------------------------------------------------------
 setlocal
 set VER=1.4.0
 set ROOT=%~dp0..
-set OUT=%ROOT%\release\PT_SMD2ASE_v%VER%
+set OUT=%ROOT%\release\PT_RosettaStone_v%VER%
 
 if exist "%OUT%" rmdir /s /q "%OUT%"
 mkdir "%OUT%\3dsMax" "%OUT%\Blender" "%OUT%\Guide_images" "%OUT%\Source" || goto :fail
 
 dotnet build "%~dp0PT_SMD2ASE\PT_SMD2ASE.csproj" -c Release -f net48 -nologo -v q || goto :fail
 dotnet build "%~dp0smd2ase\smd2ase.csproj" -c Release -f net48 -nologo -v q || goto :fail
-copy /y "%~dp0PT_SMD2ASE\bin\Release\net48\PT_SMD2ASE.exe" "%OUT%\" >nul || goto :fail
+copy /y "%~dp0PT_SMD2ASE\bin\Release\net48\PT_RosettaStone.exe" "%OUT%\" >nul || goto :fail
 copy /y "%~dp0smd2ase\bin\Release\net48\smd2ase.exe" "%OUT%\" >nul || goto :fail
 
 copy /y "%ROOT%\tools\max\PT_ASE_Importer.ms" "%OUT%\3dsMax\" >nul || goto :fail
@@ -60,10 +60,10 @@ if /i "%1"=="standalone" (
     -o "%ROOT%\release\standalone-net8" -nologo -v q || goto :fail
 )
 
-powershell -NoProfile -Command "Compress-Archive -Force -Path '%OUT%\*' -DestinationPath '%ROOT%\release\PT_SMD2ASE_v%VER%.zip'" || goto :fail
+powershell -NoProfile -Command "Compress-Archive -Force -Path '%OUT%\*' -DestinationPath '%ROOT%\release\PT_RosettaStone_v%VER%.zip'" || goto :fail
 echo.
 echo Release ready: %OUT%
-echo           zip: %ROOT%\release\PT_SMD2ASE_v%VER%.zip
+echo           zip: %ROOT%\release\PT_RosettaStone_v%VER%.zip
 exit /b 0
 
 :fail

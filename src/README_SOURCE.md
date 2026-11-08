@@ -15,7 +15,7 @@ src\                         C# solution (PTTools.sln)
                              3ds Max / Blender and installs the plug-ins
   smd2ase\                   command-line app, net48 + net8.0
   Guide\                     Guide_3dsMax.html, Guide_Blender.html + Guide_images\ (+ capture_scripts\ used to make the screenshots)
-  build_release.cmd          builds ..\release\PT_SMD2ASE_v<ver>\ and the zip
+  build_release.cmd          builds ..\release\PT_RosettaStone_v<ver>\ and the zip
   README_release.txt         README that ships in the release
 
 smdanim\                     Python reference implementation (the C# port is byte-identical to it)

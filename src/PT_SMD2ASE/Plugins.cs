@@ -244,7 +244,7 @@ namespace PT_SMD2ASE
         static (bool, string) InstallMax(PluginTarget t)
         {
             string src = MaxSource;
-            if (src == null) return (false, "The 3dsMax plug-in files were not found next to PT_SMD2ASE.exe (3dsMax folder).");
+            if (src == null) return (false, "The 3dsMax plug-in files were not found next to PT_RosettaStone.exe (3dsMax folder).");
             var targets = new List<string>();
             if (File.Exists(Path.Combine(t.SystemStartup, MaxFiles[0]))) targets.Add(t.SystemStartup);   // update the old copy where it is
             if (File.Exists(Path.Combine(t.UserStartup, MaxFiles[0])) || targets.Count == 0) targets.Add(t.UserStartup);
@@ -281,7 +281,7 @@ namespace PT_SMD2ASE
         static (bool, string) InstallBlender(PluginTarget t)
         {
             string zip = BlenderZip;
-            if (zip == null) return (false, "Blender\\" + BlenderZipName + " was not found next to PT_SMD2ASE.exe.");
+            if (zip == null) return (false, "Blender\\" + BlenderZipName + " was not found next to PT_RosettaStone.exe.");
             var psi = new ProcessStartInfo(t.Exe, "-c extension install-file -r user_default -e \"" + zip + "\"")
             {
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,

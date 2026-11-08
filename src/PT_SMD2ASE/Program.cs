@@ -79,8 +79,8 @@ namespace PT_SMD2ASE
                         report.AppendLine("single file: warning=" + f.TestWarningVisible + " status=" + f.TestStatus);
                         Shot("cs_gui_3_single.png");
                         if (client != null) { f.TestInput(new[] { client }); step++; break; }
-                        step = 6;
-                        goto case 6;
+                        step = 8;
+                        goto case 8;
                     case 4:
                         report.AppendLine("game folder: whole=" + f.TestWhole + " warning=" + f.TestWarningVisible + " convertEnabled=" + f.TestConvertEnabled);
                         Shot("cs_gui_4_client.png");
@@ -92,9 +92,16 @@ namespace PT_SMD2ASE
                         if (f.TestBusy) break;
                         report.AppendLine("game folder done: " + f.TestStatus);
                         Shot("cs_gui_5_client_done.png");
+                        f.TestEncode(new[] { outDir });                             // the readable copies back to game format
                         step++;
-                        goto case 6;
+                        break;
                     case 6:
+                        if (f.TestBusy) break;
+                        report.AppendLine("encode done: " + f.TestStatus);
+                        Shot("cs_gui_6_encode_done.png");
+                        step = 8;
+                        goto case 8;
+                    case 8:
                         File.WriteAllText(Path.Combine(shotDir, "cs_gui_selftest.txt"), report.ToString());
                         timer.Stop();
                         f.Close();

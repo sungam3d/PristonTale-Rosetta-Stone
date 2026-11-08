@@ -1,5 +1,5 @@
-PT SMD -> ASE Converter  v1.4.0
-===============================
+PristonTale - Rosetta Stone  v1.4.0
+===================================
 
 Turns Priston Tale game files (.smd) into .ase files for 3ds Max and Blender:
 maps, weapons and items, monsters and characters - with textures, skeletons
@@ -12,7 +12,7 @@ readable (UTF-8) Korean text and the .ini/.inf/.in behind every compiled .inx.
 QUICK START
 -----------
 1. Convert
-   Double-click PT_SMD2ASE.exe and drag an .smd file or a folder onto it.
+   Double-click PT_RosettaStone.exe and drag an .smd file or a folder onto it.
    (Maps: Field\   Weapons/items: image\Sinimage\Items\DropItem\
     Monsters: char\monster\   Player armour/heads: char\tmABCD\)
    Maps are split into separate objects like the original .ase files
@@ -26,7 +26,7 @@ QUICK START
      .inf .ini .in .sin .msg .txt .lua -> UTF-8 text
      .inx (monster/NPC/player model info) -> the .ini/.inf/.in it was built from
      _server\  the model info again in the game's Korean code page (for the server)
-   "Back to game format..." does the reverse for edited files:
+   The ENCODE box (right) does the reverse for edited files:
      .ini/.inf/.in -> .inx, .wav/.bmp/.tga -> the game's headers.
    Keep the game's folder names (char\monster\...): the .inx stores a checksum of its path.
 

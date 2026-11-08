@@ -1,4 +1,6 @@
-# Priston Tale SMD → ASE Converter
+# PristonTale - Rosetta Stone
+
+*(formerly "PT SMD → ASE Converter")* · Decode Priston Tale game files into formats you can open, and encode your edits back.
 
 Open Priston Tale's game models in **3ds Max** and **Blender**, edit them, and export them back for the game.
 
@@ -37,7 +39,7 @@ Drop the whole Priston Tale folder in and everything comes out readable, in the 
 | `.inx` compiled model info of monsters, NPCs and player models | the `.ini` / `.inf` / `.in` it was compiled from: model files, detail levels, every animation's frames and key events |
 
 `_server\` gets the model info files again in the game's own Korean code page, the form the server reads.
-**Back to game format** turns edited files the other way: `.ini` / `.inf` / `.in` → `.inx`, `.wav` → the game's sound
+The **Encode** box on the right turns edited files the other way (into `game_format` in the output folder): `.ini` / `.inf` / `.in` → `.inx`, `.wav` → the game's sound
 header, `.bmp` / `.tga` → the game's texture header. The `.inx` rebuild is byte-for-byte the game's own (checked on all
 2455 `.inx` files of a current client).
 
@@ -48,7 +50,7 @@ header, `.bmp` / `.tga` → the game's texture header. The `.inx` rebuild is byt
 
 ## Quick start
 
-1. **Convert.** Run `PT_SMD2ASE.exe` and drag a `.smd` file or a whole folder from your Priston Tale client onto it:
+1. **Convert.** Run `PT_RosettaStone.exe` and drag a `.smd` file or a whole folder from your Priston Tale client onto it:
    `Field\` for maps, `char\monster\` for monsters, `char\tmABCD\` for characters,
    `image\Sinimage\Items\DropItem\` for weapons and items, or the whole game folder for everything.
 2. **Install the plug-in** for your program: the window finds 3ds Max and Blender on your PC and shows an
