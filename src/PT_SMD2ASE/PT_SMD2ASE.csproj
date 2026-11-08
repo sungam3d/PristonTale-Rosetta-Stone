@@ -9,16 +9,19 @@
     <AssemblyName>PT_SMD2ASE</AssemblyName>
     <RootNamespace>PT_SMD2ASE</RootNamespace>
     <ApplicationIcon>PT_SMD2ASE.ico</ApplicationIcon>
-    <Version>1.3.3</Version>
+    <Version>1.4.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>PT SMD to ASE Converter</Product>
-    <Description>Converts Priston Tale .smd map files to 3ds Max .ase</Description>
+    <Description>Converts Priston Tale game files (models, textures, sounds, text, model info) to readable formats</Description>
     <Copyright>Copyright (c) 2026 sungam3d - MIT License</Copyright>
   </PropertyGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <Reference Include="System.Numerics" />
+    <Reference Include="System.IO.Compression" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\PTSmd\*.cs" Link="PTSmd\%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\smdanim\data\items.txt" LogicalName="PTSmd.data.items.txt" />
+    <EmbeddedResource Include="..\..\smdanim\data\skills.txt" LogicalName="PTSmd.data.skills.txt" />
   </ItemGroup>
 </Project>

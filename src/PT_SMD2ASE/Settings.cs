@@ -16,7 +16,8 @@ namespace PT_SMD2ASE
 
         public string OutDir = DefaultOut, LastIn = "", Collision = "split";
         public bool Textures = true, VertexColors = true, Lights = true, SplitObjects = true;
-        public int What = 0, Width = 780, Height = 700;
+        public bool Models = true, Sounds = true, Text = true, ModelInfo = true, ServerCopy = true;   // whole game folder
+        public int What = 0, Width = 800, Height = 860;
 
         public static Settings Load()
         {
@@ -39,8 +40,13 @@ namespace PT_SMD2ASE
                 if (d.TryGetValue("lights", out v)) s.Lights = v == "1";
                 if (d.TryGetValue("split_objects", out v)) s.SplitObjects = v == "1";
                 if (d.TryGetValue("what", out v)) int.TryParse(v, out s.What);
+                if (d.TryGetValue("models", out v)) s.Models = v == "1";
+                if (d.TryGetValue("sounds", out v)) s.Sounds = v == "1";
+                if (d.TryGetValue("text", out v)) s.Text = v == "1";
+                if (d.TryGetValue("model_info", out v)) s.ModelInfo = v == "1";
+                if (d.TryGetValue("server_copy", out v)) s.ServerCopy = v == "1";
                 if (d.TryGetValue("width", out v) && int.TryParse(v, out int w) && w >= 640) s.Width = w;
-                if (d.TryGetValue("height", out v) && int.TryParse(v, out int h) && h >= 560) s.Height = h;
+                if (d.TryGetValue("height", out v) && int.TryParse(v, out int h) && h >= 800) s.Height = h;   // (smaller: saved before the plug-in panel)
             }
             catch (Exception) { }
             return s;
@@ -56,6 +62,8 @@ namespace PT_SMD2ASE
                     "out=" + OutDir, "last_in=" + LastIn, "collision=" + Collision,
                     "textures=" + (Textures ? 1 : 0), "vertex_colors=" + (VertexColors ? 1 : 0), "lights=" + (Lights ? 1 : 0), "split_objects=" + (SplitObjects ? 1 : 0),
                     "what=" + What.ToString(CultureInfo.InvariantCulture),
+                    "models=" + (Models ? 1 : 0), "sounds=" + (Sounds ? 1 : 0), "text=" + (Text ? 1 : 0),
+                    "model_info=" + (ModelInfo ? 1 : 0), "server_copy=" + (ServerCopy ? 1 : 0),
                     "width=" + Width.ToString(CultureInfo.InvariantCulture), "height=" + Height.ToString(CultureInfo.InvariantCulture),
                 });
             }

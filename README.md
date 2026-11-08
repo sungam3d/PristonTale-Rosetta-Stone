@@ -3,7 +3,7 @@
 Open Priston Tale's game models in **3ds Max** and **Blender**, edit them, and export them back for the game.
 
 The converter turns the game's `.smd` / `.smb` files back into `.ase`, the 3ds Max format the game was originally made
-with. The plug-ins import them with textures, skeletons and animation, and export your edits back to `.ase` in the same
+with, and the rest of the game folder (textures, sounds, Korean text, compiled model info) into files any program reads. The plug-ins import them with textures, skeletons and animation, and export your edits back to `.ase` in the same
 layout as the developers' own files, so the game can rebuild its `.smd` / `.smb` from them.
 
 **[⬇ Download the latest release](https://github.com/sungam3d/Pristontale-SMD-to-ASE-Converter/releases/latest)**
@@ -24,6 +24,23 @@ layout as the developers' own files, so the game can rebuild its `.smd` / `.smb`
 Models are checked against the game's own maths: they move the same as in the game, and import → export gives back the
 same bones, skin and animation.
 
+### The whole game folder (v1.4.0)
+
+Drop the whole Priston Tale folder in and everything comes out readable, in the same folder layout:
+
+| Game file | Becomes |
+|---|---|
+| `.smd` models and maps | `.ase` |
+| `.bmp` / `.tga` textures (scrambled header) | normal images |
+| `.wav` sound effects (header starts with `JODO` instead of `RIFF`) | playable `.wav`; music (`.bgm`) as `.wav` too |
+| `.inf` `.ini` `.in` `.sin` `.msg` `.txt` `.lua` … (Korean, code page 949) | UTF-8 text, readable in any editor |
+| `.inx` compiled model info of monsters, NPCs and player models | the `.ini` / `.inf` / `.in` it was compiled from: model files, detail levels, every animation's frames and key events |
+
+`_server\` gets the model info files again in the game's own Korean code page, the form the server reads.
+**Back to game format** turns edited files the other way: `.ini` / `.inf` / `.in` → `.inx`, `.wav` → the game's sound
+header, `.bmp` / `.tga` → the game's texture header. The `.inx` rebuild is byte-for-byte the game's own (checked on all
+2455 `.inx` files of a current client).
+
 <p>
   <img src="src/Guide/Guide_images/max_character.png" alt="A character with its motion list in 3ds Max" width="49%">
   <img src="src/Guide/Guide_images/blender_character.png" alt="A character with its motion list in Blender" width="49%">
@@ -33,8 +50,9 @@ same bones, skin and animation.
 
 1. **Convert.** Run `PT_SMD2ASE.exe` and drag a `.smd` file or a whole folder from your Priston Tale client onto it:
    `Field\` for maps, `char\monster\` for monsters, `char\tmABCD\` for characters,
-   `image\Sinimage\Items\DropItem\` for weapons and items.
-2. **Install the plug-in** for your program:
+   `image\Sinimage\Items\DropItem\` for weapons and items, or the whole game folder for everything.
+2. **Install the plug-in** for your program: the window finds 3ds Max and Blender on your PC and shows an
+   **Install** / **Update** button for each. By hand:
    - **3ds Max 2020 or newer:** copy the four files from `3dsMax\` into `<3ds Max>\scripts\startup\` and restart Max.
    - **Blender 4.2 or newer:** Edit → Preferences → Get Extensions → ⌄ → Install from Disk… → `Blender\pt_ase_importer.zip`.
 3. **Import** the `.ase` files. Characters and monsters come in animated: pick a motion from the PT Motions list
@@ -56,6 +74,7 @@ covering every feature and exactly which files to replace when you put your work
 | `tools\max\` | 3ds Max import/export scripts |
 | `tools\blender\` | Blender import/export add-on |
 | `scripts\` | Verification scripts used to check the converter and plug-ins against the game |
+| `smdanim\clientfiles.py` | Sounds, text and `.inx` model info (the reference for `src\PTSmd\ClientFiles.cs`) |
 | `docs\TECHNICAL.md` | How the `.smd` / `.smb` / `.inx` formats work and what was verified |
 
 Building: run `src\build_release.cmd` (needs the .NET 8 SDK and Python 3). See [src/README_SOURCE.md](src/README_SOURCE.md).

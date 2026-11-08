@@ -239,7 +239,60 @@ float precision (0.01–0.03), and artist files whose bones are missing (CtfbF40
 Before this work, 3ds Max was up to 13.8 off the game (monavelrisk-sword: a quaternion sign flip), 5.2 (spider:
 scaled bind poses) and 2.6 (salon: keys before frame 0); Blender flagged 257 of the 4509 files.
 
-## Status (v1.3.3)
+## The rest of the client (v1.4.0)
+
+`smdanim/clientfiles.py` (reference) and `src/PTSmd/ClientFiles.cs` + `ClientConvert.cs` (the exe). A survey of a
+current client (5.4 GB): 12 646 `.bmp`, 5 441 `.tga`, 4 306 `.smd`, 2 825 `.wav`, 2 455 `.inx`, 1 025 `.smb`, 823 `.inf`,
+645 `.part`, 541 `.sin`, 263 `.ini`, 237 `.msg`, 11 `.bgm`.
+
+**Sounds.** 2 720 of the `.wav` files start with `JODO` where a wave file has `RIFF`; nothing else differs (the sizes
+in the header are right). `.bgm` music files are ordinary waves.
+
+**Text.** `.inf .ini .in .sin .msg .txt .lua .cht` are Korean in code page 949 (none are UTF-8; `.part` particle
+scripts are ASCII). The readable copies are UTF-8 with a byte-order mark; ASCII files and anything that isn't clean
+CP949 are left as they are.
+
+**`.inx`** is the compiled `smMODELINFO` (`fileread.cpp` `AddModelDecode`) that the game writes from a model's
+`.ini` (monsters, NPCs), `.inf` (player armour and heads) or `.in` (the class motion files `M1Bip` … `M8Bip`):
+
+| Offset | Contents |
+|---|---|
+| 0x000, 0x040, 0x080 | model file, motion file, sub-motion file (64 bytes each, with the `.ini`'s folder in front) |
+| 0x0C0 | three detail levels (`*정밀모양` / `*보통모양` / `*저질모양`): count + 4 × 16-byte names |
+| 0x18C | 512 motions: 120 bytes each in 2012 clients (one-byte item codes; 21 files of 67 084 bytes still ship), 172 in later ones (two-byte item codes; 95 268-byte files) |
+| then | motion count, two path-checksum words, link file (`*파일연결`), face files, 30 face motions, the NPC / face motion rates |
+
+A motion: state (`CHRMOTION_STATE_*`), start and end frame, four key events (ticks from the start, 160 per frame;
+can be negative), the weapons it is for (`*착용무기`, indexes into `sItem[]`), classes (`*적용직업` bit mask; Assassin
+0x100, Shaman 0x200, Martial Artist 0x400 came after the 2012 source), skills (`*적용기술`, indexes into
+`SkillDataCode[]`), map position, repeat, key letter and which `*동작모음` file it is in.
+
+The start/end frames of slots 10 and up are mixed with `GetSpeedSum` of the `.inx`'s own path, upper-cased
+(`MotionKeyWordEncode`), when there are more than 10 motions and at most 10 face motions; the two checksum words
+(`ModelKeyWordEncode`) also mix in the `*파일연결` file's checksum. So an `.inx` has to be rebuilt for the path it is
+used at. What the compiler does that a rebuild has to copy exactly:
+- the keywords are checked in a fixed order and a later match wins (`뛰는` → run … `만세`); stand, walk and run repeat by
+  themselves; a death motion's end frame is stored 8 frames early;
+- after the frames: key events, then one token (a key letter, or `반복` = repeat), then `(n)` = the motion's share
+  of the NPC's idle animations, which is balanced to 100 and expanded into a 100-entry table;
+- body and face motions count the `*동작모음` files together (a face motion's file number is one less);
+- a detail-level name of 16+ characters runs on into the next slot (`lstrcpy`); a weapon list of 53 runs on into the
+  class bits (then overwritten by `*적용직업` if there is one).
+
+The rebuilt text uses the source's item and skill names (`smdanim/data/*.txt`, from `scripts/make_name_tables.py`);
+codes the 2012 tables don't have, or have twice, are written `#n`, which the rebuild reads back. Names of the glued
+`*동작모음` files aren't stored in the `.inx`, so they come out as `<motion file>_01.ASE`, `_02` ….
+
+Checked on the whole client (`scripts/check_inx.py`, `smd2ase --check-inx`): all 2 455 `.inx` decompile and compile
+back byte for byte; 839 of the 847 shipped `.ini` / `.inf` / `.in` compile to their `.inx` exactly (the other 8 are
+`M1Bip.in` … `M8Bip.in`, older than their `.inx`; the converter writes the rebuilt one and keeps those as
+`.shipped.in`). `scripts/compare_clientfiles.py` checks the C# whole-folder output against Python (9 486 files, all
+identical, .NET Framework 4.8 and .NET 8). Through the readable UTF-8 copies and back (`--to-game`), 2 369 files come out
+identical; the rest differ only in the stored folder's upper/lower case (the game ignores it; the checksum is
+case-blind), in using the current 172-byte layout for the 21 old ones (`--inx-layout 120` keeps it), or (`Lilly.inx`)
+in having been copied from another NPC's folder.
+
+## Status (v1.4.0)
 
 Done and verified (see `src\README_SOURCE.md` for the check list):
 1. Converter (C# exe + Python reference, byte-identical): skeleton lookup (`.inx`/`.ini` → class skeleton from the file
@@ -250,6 +303,9 @@ Done and verified (see `src\README_SOURCE.md` for the check list):
    bones, skin and animation.
 3. Blender: Armature, vertex groups + Armature modifier, linear action, timeline markers, PT tab motion list; export
    with bones, skin and animation.
+4. Whole game folder: textures, sounds, text and `.inx` model info both ways (above); the window finds 3ds Max
+   (registry) and Blender 4.2+ and installs or updates the plug-ins (Max: the user's own startup scripts folder, or an
+   older copy in Max's folder where it is; Blender: `blender -c extension install-file -r user_default -e`).
 
 Not done:
 - Replacing the animation of monsters that keep it in a separate (often glued) motion file: their model and skin can

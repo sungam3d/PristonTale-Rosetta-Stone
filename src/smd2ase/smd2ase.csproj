@@ -5,7 +5,7 @@
     <TargetFrameworks>net48;net8.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <AssemblyName>smd2ase</AssemblyName>
-    <Version>1.3.3</Version>
+    <Version>1.4.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <ApplicationIcon>..\PT_SMD2ASE\PT_SMD2ASE.ico</ApplicationIcon>
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -15,5 +15,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\PTSmd\*.cs" Link="PTSmd\%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\smdanim\data\items.txt" LogicalName="PTSmd.data.items.txt" />
+    <EmbeddedResource Include="..\..\smdanim\data\skills.txt" LogicalName="PTSmd.data.skills.txt" />
   </ItemGroup>
 </Project>

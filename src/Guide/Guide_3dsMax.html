@@ -88,6 +88,8 @@ maps, weapons and items, monsters and characters, with textures, skeletons and a
 <b>More info → Run anyway</b> (the program isn't signed).</p>
 
 <h3>The 3ds Max plug-in (once)</h3>
+<p><b>Easiest:</b> start <b>PT_SMD2ASE.exe</b>. Under <i>3ds Max / Blender plug-ins</i> it lists every 3ds Max on your PC; click <b>Install</b> (or <b>Update</b>), then restart 3ds Max and do steps 4–5 below. It installs into your own user scripts folder, so it needs no administrator rights (an older copy in 3ds Max's own folder is updated where it is, and Windows asks for permission).</p>
+<p>By hand:</p>
 <ol class="steps">
   <li>Close 3ds Max.</li>
   <li>Copy the 4 files from the <code>3dsMax</code> folder (<code>PT_ASE_Importer.ms</code>, <code>PT_ASE_Exporter.ms</code>,
@@ -105,7 +107,7 @@ Just want to try it? <b>Scripting → Run Script…</b> → <code>PT_ASE_Importe
 <ol class="steps">
   <li>Double-click <b>PT_SMD2ASE.exe</b>.</li>
   <li>Choose an <b>Output folder</b> (or keep the one shown).</li>
-  <li>Drag an <code>.smd</code> file, or a whole folder, onto the big box at the top. A single file converts straight away.</li>
+  <li>Drag an <code>.smd</code> file, a folder, or the whole game folder onto the big box at the top. A single file converts straight away.</li>
   <li>For a folder, the window shows how many files it found and how long it will take. Tick
       <b>I understand, continue</b> and click <b>Convert</b>.</li>
   <li>Click <b>Open</b> to see the results.</li>
@@ -138,13 +140,31 @@ Just want to try it? <b>Scripting → Run Script…</b> → <code>PT_ASE_Importe
   <tr><td>Split maps into separate objects</td><td>Cuts a map into separate objects (buildings, trees, terrain…), close to
       how the original <code>.ase</code> files were made. Untick it to get the whole map as one mesh.</td></tr>
   <tr><td>Collision walls</td><td>The invisible walls of a map: <i>separate object</i> (easy to hide), <i>keep in mesh</i>, or <i>remove</i>.</td></tr>
-  <tr><td>Convert</td><td><i>Everything</i>, <i>Terrain maps only</i>, or <i>Objects, characters, monsters</i> (skips map terrain).</td></tr>
+  <tr><td>Convert</td><td><i>Every .smd model and map</i>, <i>Terrain maps only</i>, <i>Objects, characters, monsters</i> (skips map terrain), or <i>Whole game folder</i> (below).</td></tr>
 </table></div>
 <div class="note"><b>Keep the output folder together.</b> The <code>.ase</code> files need the <code>textures</code> folder.
 Player armour and heads also need their class animation file (<code>m1_motions.ase</code> … <code>m8_motions.ase</code>),
 which the converter writes into the same folder.</div>
 <p>Command line, for scripts: <code>smd2ase.exe &lt;file or folder&gt; -o &lt;output folder&gt; --textures</code>.
 Run <code>smd2ase.exe --help</code> for every option.</p>
+
+<h3>The whole game folder</h3>
+<p>Drop the whole Priston Tale folder onto the window and <b>Convert</b> switches to <i>Whole game folder</i> by itself.
+Everything comes out readable, in the game's own folder layout:</p>
+<div class="table-wrap"><table>
+  <tr><th>Game file</th><th>Becomes</th></tr>
+  <tr><td><code>.smd</code></td><td><code>.ase</code> (as above)</td></tr>
+  <tr><td><code>.bmp</code> / <code>.tga</code></td><td>Normal images, next to their models</td></tr>
+  <tr><td><code>.wav</code> sound effects</td><td>Playable waves (the game scrambles their first 4 bytes). Music (<code>.bgm</code>) is saved as <code>.wav</code>.</td></tr>
+  <tr><td><code>.inf</code> <code>.ini</code> <code>.in</code> <code>.sin</code> <code>.msg</code> <code>.txt</code> <code>.lua</code></td><td>Korean text, saved as UTF-8 so any editor shows it</td></tr>
+  <tr><td><code>.inx</code></td><td>The compiled model info of monsters, NPCs and player models, rebuilt as the <code>.ini</code> /
+      <code>.inf</code> / <code>.in</code> it was made from: model files, detail levels, and every animation with its frames and key events</td></tr>
+  <tr><td><code>_server\</code></td><td>The model info files again in the game's Korean code page: the form the server reads</td></tr>
+</table></div>
+<p>The ticks under <b>Convert</b> leave kinds of file out. <b>Back to game format…</b> goes the other way for files you edited:
+<code>.ini</code> / <code>.inf</code> / <code>.in</code> → <code>.inx</code>, <code>.wav</code>, <code>.bmp</code> and <code>.tga</code> → the game's own headers,
+written to <code>game_format</code> in the output folder. Keep the game's folder names (<code>char\monster\…</code>): an <code>.inx</code> stores a checksum of its own path.</p>
+<figure><img src="Guide_images/convert_whole.png" alt="Converter set to the whole game folder"></figure>
 
 <!-- ============================================================ IMPORT -->
 <h2 id="import">4. Import into 3ds Max</h2>

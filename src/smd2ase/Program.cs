@@ -31,12 +31,30 @@ usage: smd2ase <file.smd | file.smb | folder> [...] [options]
   --lod all               keep every monster detail level (default: high detail only)
   --no-lights             do not write stage lights
 
-texture tools:
-  --encode-textures DIR   scramble every plain .bmp/.tga under DIR the way the game client
-                          ships them (for textures exported next to an edited .ase)
+whole client:
+  --client                convert everything in the game folder(s) given, keeping the folder
+                          layout: models -> .ase, textures, sounds (.wav playable again, .bgm
+                          -> .wav), Korean text -> UTF-8, compiled model info (.inx) -> the
+                          .ini / .inf / .in it was built from; plus <out>\_server\ with the
+                          model info in the game's own code page (CP949)
+  --no-models / --no-textures / --no-sounds / --no-text / --no-modelinfo / --no-server-copy
+                          leave that kind out (with --client)
+  --copy-other            also copy every other file unchanged (with --client)
 
-example:
-  smd2ase ""C:\Program Files (x86)\MasangSoft\PristonTale(Test)\Field"" -o D:\PT-ASE --textures";
+back to the game:
+  --to-game               the files / folders given -> the forms the client ships:
+                          .ini/.inf/.in -> .inx (+ CP949 text), .wav -> client sound header,
+                          .bmp/.tga -> client texture header, UTF-8 text -> CP949
+  --inx-layout 120        write .inx for 2012 clients (default 172: later clients)
+  --encode-textures DIR   scramble every plain .bmp/.tga under DIR in place
+
+checks:
+  --check-inx DIR         decompile + recompile every .inx under DIR and compare (byte for byte)
+
+examples:
+  smd2ase ""C:\Program Files (x86)\MasangSoft\PristonTale(Test)\Field"" -o D:\PT-ASE --textures
+  smd2ase --client ""C:\Program Files (x86)\MasangSoft\PristonTale(Test)"" -o D:\PT-Readable
+  smd2ase --to-game D:\PT-Readable\char\monster\Tees -o D:\PT-Game";
 
         static int Main(string[] args)
         {
@@ -44,6 +62,9 @@ example:
             var s = new BatchSettings();
             var t = s.Template;
             s.Textures = false;
+            var cs = new ClientSettings { Template = t };
+            bool client = false, toGame = false, outSet = false;
+            int layout = 172;
             try
             {
                 for (int i = 0; i < args.Length; i++)
@@ -52,7 +73,18 @@ example:
                     switch (a)
                     {
                         case "-h": case "--help": case "/?": Console.WriteLine(Help); return 0;
-                        case "-o": case "--out": s.OutDir = args[++i]; break;
+                        case "-o": case "--out": s.OutDir = args[++i]; outSet = true; break;
+                        case "--client": client = true; break;
+                        case "--to-game": toGame = true; break;
+                        case "--no-models": cs.Models = false; break;
+                        case "--no-sounds": cs.Sounds = false; break;
+                        case "--no-textures": cs.Textures = false; break;
+                        case "--no-text": cs.Text = false; break;
+                        case "--no-modelinfo": cs.ModelInfo = false; break;
+                        case "--no-server-copy": cs.ServerCopy = false; break;
+                        case "--copy-other": cs.CopyOther = true; break;
+                        case "--inx-layout": layout = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
+                        case "--check-inx": return CheckInx(args[++i]);
                         case "--game-root": s.GameRoot = args[++i]; break;
                         case "--textures": s.Textures = true; break;
                         case "--stages-only": s.StagesOnly = true; break;
@@ -88,6 +120,26 @@ example:
             }
             if (inputs.Count == 0) { Console.WriteLine(Help); return 1; }
             foreach (var p in inputs) if (!File.Exists(p) && !Directory.Exists(p)) Console.WriteLine("warning: " + p + " not found");
+            if (client)
+            {
+                cs.OutDir = outSet ? s.OutDir : "client_out";
+                var scan = ClientConvert.ScanInputs(inputs);
+                foreach (var root in scan.Roots) Console.WriteLine("game folder: " + root);
+                ClientResult cr;
+                try { cr = ClientConvert.Run(scan, cs, null, (line, ok) => { if (!ok) Console.WriteLine(line); }); }
+                catch (ArgumentException e) { Console.Error.WriteLine(e.Message); return 1; }
+                Console.WriteLine("{0} in {1:0.0}s -> {2}", cr.Summary(), cr.Elapsed.TotalSeconds, Path.GetFullPath(cs.OutDir));
+                if (cr.ServerDir != null) Console.WriteLine("server model info (CP949): " + cr.ServerDir);
+                if (cr.MissingReport != null) Console.WriteLine("{0} referenced textures not found (listed in {1})", cr.Missing.Count, cr.MissingReport);
+                return cr.Failed == 0 ? 0 : 2;
+            }
+            if (toGame)
+            {
+                string od = outSet ? s.OutDir : "game_out";
+                var gr = ClientConvert.ToGame(inputs, od, (line, ok) => Console.WriteLine(line), layout);
+                Console.WriteLine("{0} -> {1}", gr.Summary(), Path.GetFullPath(od));
+                return gr.Failed == 0 ? 0 : 2;
+            }
             var files = Batch.Collect(inputs);
             if (files.Count == 0) { Console.WriteLine("no .smd / .smb files found"); return 1; }
             var r = Batch.Run(files, s, null, (line, ok) => Console.WriteLine(line));
@@ -96,6 +148,30 @@ example:
             if (r.MissingReport != null)
                 Console.WriteLine("{0} referenced textures not found on disk (listed in {1})", r.Missing.Count, r.MissingReport);
             return r.Failed == 0 ? 0 : 2;
+        }
+
+        /// <summary>Every .inx under dir: decompile, compile again, compare byte for byte.</summary>
+        static int CheckInx(string dir)
+        {
+            int ok = 0, bad = 0;
+            foreach (var f in Directory.EnumerateFiles(dir, "*.inx", SearchOption.AllDirectories))
+            {
+                string rel = Converter.RelPath(f, dir) ?? Path.GetFileName(f);
+                byte[] b = File.ReadAllBytes(f);
+                try
+                {
+                    var mi = ClientFiles.ReadInx(b);
+                    string text = ClientFiles.InxToIni(mi, rel);
+                    byte[] b2 = ClientFiles.CompileIni(text, rel, mi.Layout.Rec, mi.Folder.Length > 0 ? mi.Folder : null, mi.Code);
+                    bool same = b.Length == b2.Length;
+                    for (int k = 0; same && k < b.Length; k++) same = b[k] == b2[k];
+                    if (same) ok++;
+                    else { bad++; if (bad <= 10) Console.WriteLine("differs: " + rel); }
+                }
+                catch (Exception e) { bad++; Console.WriteLine("ERROR " + rel + ": " + e.Message); }
+            }
+            Console.WriteLine("round trip: {0} identical, {1} differ", ok, bad);
+            return bad == 0 ? 0 : 2;
         }
     }
 }

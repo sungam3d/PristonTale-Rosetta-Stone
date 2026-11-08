@@ -22,7 +22,7 @@ namespace PT_SMD2ASE
 
             if (args.Length >= 5 && args[0] == "--selftest")
             {
-                SelfTest(args[1], args[2], args[3], args[4]);
+                SelfTest(args[1], args[2], args[3], args[4], args.Length > 5 ? args[5] : null);
                 return;
             }
             // files/folders dropped onto the exe icon arrive as arguments
@@ -35,8 +35,9 @@ namespace PT_SMD2ASE
         static extern bool SetProcessDPIAware();
 #endif
 
-        /// <summary>Drives the real window: folder (warning + gating), then a single file. Screenshots to shotDir.</summary>
-        static void SelfTest(string outDir, string folder, string file, string shotDir)
+        /// <summary>Drives the real window: folder (warning + gating), then a single file, then (optional) a
+        /// whole game folder. Screenshots to shotDir.</summary>
+        static void SelfTest(string outDir, string folder, string file, string shotDir, string client)
         {
             MainForm.QuietForTests = true;
             var f = new MainForm(null);
@@ -55,7 +56,7 @@ namespace PT_SMD2ASE
             {
                 switch (step)
                 {
-                    case 0: f.TestSetOut(outDir); Shot("cs_gui_0_start.png"); f.TestInput(new[] { folder }); step++; break;
+                    case 0: f.TestSetOut(outDir); f.TestSetMode(0); Shot("cs_gui_0_start.png"); f.TestInput(new[] { folder }); step++; break;
                     case 1:
                         report.AppendLine("folder: warning=" + f.TestWarningVisible + " convertEnabled=" + f.TestConvertEnabled);
                         f.TestConvert();                                            // must be ignored (not ticked)
@@ -77,6 +78,23 @@ namespace PT_SMD2ASE
                         if (f.TestBusy) break;
                         report.AppendLine("single file: warning=" + f.TestWarningVisible + " status=" + f.TestStatus);
                         Shot("cs_gui_3_single.png");
+                        if (client != null) { f.TestInput(new[] { client }); step++; break; }
+                        step = 6;
+                        goto case 6;
+                    case 4:
+                        report.AppendLine("game folder: mode=" + f.TestMode + " warning=" + f.TestWarningVisible + " convertEnabled=" + f.TestConvertEnabled);
+                        Shot("cs_gui_4_client.png");
+                        f.TestTick();
+                        f.TestConvert();
+                        step++;
+                        break;
+                    case 5:
+                        if (f.TestBusy) break;
+                        report.AppendLine("game folder done: " + f.TestStatus);
+                        Shot("cs_gui_5_client_done.png");
+                        step++;
+                        goto case 6;
+                    case 6:
                         File.WriteAllText(Path.Combine(shotDir, "cs_gui_selftest.txt"), report.ToString());
                         timer.Stop();
                         f.Close();

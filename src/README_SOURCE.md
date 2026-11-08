@@ -1,4 +1,4 @@
-# PT SMD → ASE: source code (v1.3.3)
+# PT SMD → ASE: source code (v1.4.0)
 
 Everything needed to rebuild the release:
 - the converter, in C# (shipped) and in Python (reference);
@@ -9,8 +9,10 @@ Everything needed to rebuild the release:
 ```
 src\                         C# solution (PTTools.sln)
   PTSmd\                     library: SMD/SMB reader, motion tables + skeleton lookup (Motion.cs),
-                             texture codec, ASE writer, batch runner
-  PT_SMD2ASE\                WinForms app (drag & drop), net48 + net8.0-windows
+                             texture codec, ASE writer, batch runner; ClientFiles.cs (sounds, text,
+                             .inx <-> .ini) and ClientConvert.cs (whole game folder, back to game format)
+  PT_SMD2ASE\                WinForms app (drag & drop), net48 + net8.0-windows; Plugins.cs finds
+                             3ds Max / Blender and installs the plug-ins
   smd2ase\                   command-line app, net48 + net8.0
   Guide\                     Guide_3dsMax.html, Guide_Blender.html + Guide_images\ (+ capture_scripts\ used to make the screenshots)
   build_release.cmd          builds ..\release\PT_SMD2ASE_v<ver>\ and the zip
@@ -20,6 +22,9 @@ smdanim\                     Python reference implementation (the C# port is byt
   smdfile.py                 SMD / SMB reader (incl. TmPrevRot cache and per-piece key tables)
   motion.py                  .inx / .ini motion tables, skeleton (.smb) lookup
   convert.py                 scene builder + ASE writer
+  clientfiles.py             sounds, text, .inx <-> .ini/.inf/.in (reference for ClientFiles.cs)
+  data\items.txt, skills.txt item / skill names in the game's index order (scripts\make_name_tables.py);
+                             embedded into the exes
 char2ase.py                  Python CLI converter
 scripts\                     verification and probe scripts (see TECHNICAL.md)
 
@@ -58,5 +63,10 @@ The 3ds Max scripts need no build step. `PT_ASE_Importer.ms` compiles `PT_ASE_Re
 | Import → export round trip, Blender and 3ds Max (monster, player armour, original costume, map, weapon) | `scripts\roundtrip_check.py`, `static_check.py` | bones and skin exact, poses ≤ 0.016 |
 | Split map (711 objects, own pivots) import → export, Blender and 3ds Max | `scripts\blender_split_map_test.py`, `max_split_map_test.ms`, `static_check.py` | every object exact |
 | Exported layout vs the developers' files (what the game's builder reads) | `scripts\ase_structure.py`, `probe_game_reader.py` | same layout |
+| Every .inx of the current client (2455): decompile → compile, Python and C# | `scripts\check_inx.py`, `smd2ase.exe --check-inx <client>` | all byte-identical |
+| Shipped .ini / .inf / .in → .inx (847) | `scripts\check_inx.py` | 839 identical; the other 8 (M1Bip–M8Bip.in) are older than their .inx |
+| Whole-folder output (sounds, text, model info, _server), C# (net48 and net8) vs Python | `scripts\compare_clientfiles.py` | 9486 files identical |
+| Readable copies → `--to-game` → .inx vs the client's | (see TECHNICAL.md) | identical apart from folder-name case / old 120-byte layout |
+| Plug-in install: 3ds Max (fresh user folder, update in place), Blender (`-c extension install-file`, scratch profile) | manual | installed and enabled |
 
 None of the game data is included; the tools read the game client's files.
