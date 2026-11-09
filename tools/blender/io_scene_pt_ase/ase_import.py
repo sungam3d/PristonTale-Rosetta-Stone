@@ -1079,3 +1079,131 @@ def frame_objects(context, objects, material_preview=True):
             bpy.ops.view3d.view_selected(use_all_regions=False)
         framed = True
     return framed
+
+
+# --------------------------------------------------------------------------- game files (.smd / .smb)
+# PT_RosettaStone writes the path of its converter (smd2ase.exe) to %APPDATA%\PT_SMD2ASE\converter.txt
+# when it installs the add-on, so game files open directly: converted to .ase first, with their
+# textures decoded, into %TEMP%\PT_RosettaStone (as in the 3ds Max plug-in).
+def converter_path(preferred=''):
+    if preferred and os.path.isfile(preferred):
+        return preferred
+    cfg = os.path.join(os.environ.get('APPDATA', ''), 'PT_SMD2ASE', 'converter.txt')
+    try:
+        with open(cfg, encoding='utf-8-sig') as f:
+            p = f.read().strip()
+        if p and os.path.isfile(p):
+            return p
+    except OSError:
+        pass
+    return ''
+
+
+def to_ase(path, converter=''):
+    """The .ase to import for `path`: itself, or a game file (.smd / .smb) converted.
+    Raises RuntimeError with the reason when it cannot."""
+    if os.path.splitext(path)[1].lower() == '.ase':
+        return path
+    conv = converter_path(converter)
+    name = os.path.basename(path)
+    if not conv:
+        raise RuntimeError("{1} is a game file. Convert it to .ase with PT_RosettaStone.exe first, or install "
+                           "the plug-in again from PT_RosettaStone.exe so that it can open game files itself.", name)
+    stem = os.path.splitext(name)[0]
+    out = os.path.join(tempfile.gettempdir(), 'PT_RosettaStone', stem)
+    os.makedirs(out, exist_ok=True)
+    import subprocess
+    flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    subprocess.run([conv, path, '-o', out, '--textures'], creationflags=flags,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    want = (stem + '.ase').lower()
+    for d, _dirs, files in os.walk(out):
+        for f in files:
+            if f.lower() == want:
+                return os.path.join(d, f)
+    raise RuntimeError("Could not convert {1}.", name)
+
+
+def find_files(folder):
+    """Every .ase / .smd / .smb below a folder (a converted .ase wins over its game file)."""
+    found = {}
+    for d, _dirs, files in os.walk(folder):
+        for f in sorted(files):
+            stem, ext = os.path.splitext(f)
+            ext = ext.lower()
+            if ext not in ('.ase', '.smd', '.smb'):
+                continue
+            key = os.path.join(d, stem).lower()
+            if ext == '.smb' and key in found:
+                continue                                      # (the model's .smd brings its bones)
+            if key not in found or ext == '.ase':
+                found[key] = os.path.join(d, f)
+    return sorted(found.values())
+
+
+# --------------------------------------------------------------------------- animation only
+def _scene_armature(context, bone_names):
+    """The PT armature to animate: the active one (or the active mesh's), else the scene's
+    armature with the most of the animation's bones."""
+    ob = context.view_layer.objects.active
+    if ob is not None and ob.type != 'ARMATURE':
+        ob = ob.find_armature() if ob.type == 'MESH' else None
+    if ob is not None and ob.type == 'ARMATURE' and any(b in ob.data.bones for b in bone_names):
+        return ob
+    best, score = None, 0
+    for o in context.scene.objects:
+        if o.type == 'ARMATURE':
+            s = sum(1 for b in bone_names if b in o.data.bones)
+            if s > score:
+                best, score = o, s
+    return best
+
+
+def apply_animation(context, path):
+    """Puts the animation of a motion file (a class's m1.smb ... m8.smb converted, a monster's
+    motion .ase) on the character already in the scene: bones found by name, old keys replaced.
+    Returns (file name, bones animated, bones in the file)."""
+    name = os.path.basename(path)
+    root = parse_ase(path)
+    tracks = ase_anim.tracks_from(root)
+    if not tracks:
+        raise RuntimeError("{1} has no bones or animation.", name)
+    arm = _scene_armature(context, list(tracks))
+    if arm is None or 'pt_bind' not in arm:
+        raise RuntimeError("None of the animation's bones is in the scene.\nImport the character first "
+                           "(Character / monster - T-pose, with bones), then its animation.")
+    import json
+    world = {nm: Matrix(rows) for nm, rows in json.loads(arm['pt_bind']).items()}
+    parent = {b.name: (b.parent.name if b.parent else '') for b in arm.data.bones}
+    found = sum(1 for nm in world if nm in tracks and tracks[nm].ticks())
+    if not found:
+        raise RuntimeError("None of the animation's bones is in the scene.\nImport the character first "
+                           "(Character / monster - T-pose, with bones), then its animation.")
+    # skinned vertices carry the difference between the written bind pose and the rigid rest
+    # pose once the character is animated (as an animated import does, see ase_anim.bind_maps)
+    maps = ase_anim.bind_maps(world, ase_anim.raw_worlds(arm))
+    for ob in context.scene.objects:
+        if ob.type != 'MESH' or ob.find_armature() != arm or ob.get('pt_bind_fixed') or 'ase_tm' not in ob:
+            continue
+        gname = {g.index: g.name for g in ob.vertex_groups}
+        assign = {}
+        for v in ob.data.vertices:
+            if v.groups:
+                g = max(v.groups, key=lambda e: e.weight)
+                if g.group in gname:
+                    assign[v.index] = gname[g.group]
+        if maps and ase_anim.apply_bind_maps(ob, assign, maps, _dbl_rows(ob['ase_tm'])):
+            ob['pt_bind_fixed'] = True
+    for m in list(arm.pt_motions):                           # the old motion list's markers
+        mk = context.scene.timeline_markers.get(m.name)
+        if mk is not None:
+            context.scene.timeline_markers.remove(mk)
+    action = _drain(ase_anim.build_action_steps(arm, world, parent, tracks,
+                                                os.path.splitext(name)[0] + '_motions'))
+    ai = ase_anim.pt_animation(root)
+    motions = ai[2] if ai else []
+    ase_anim.set_motions(context, arm, motions, action.get('pt_last_frame', 1.0))
+    arm['pt_anim_source'] = 'shared'           # a class / motion file: the game keeps it in its own file
+    arm['pt_anim_file'] = name
+    context.view_layer.update()
+    return name, found, len(tracks)

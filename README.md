@@ -206,7 +206,8 @@ By hand: copy the four files from the release's `3dsMax\` folder into `<3ds Max>
 
 ### Import
 
-- **3ds Max:** **Priston Tale → Import…**. Answer *What are you importing?* with one click, then **Import file(s)…**
+- **3ds Max and Blender** have the same import window: **Priston Tale → Import…** (top menu bar; in Blender also
+  **File → Import → Priston Tale (.ase, .smd, .smb)**). Answer *What are you importing?* with one click, then **Import file(s)…**
   (`.ase`, or the game's `.smd` / `.smb` directly) or **Import a whole folder…**:
 
   | Choice | Gives you |
@@ -218,13 +219,13 @@ By hand: copy the four files from the release's `3dsMax\` folder into `<3ds Max>
   | Character / monster – mesh only | the mesh without a skeleton |
   | Animation only | puts another animation file (`m1.smb` … `m8.smb`, or a monster's) on the character already in the scene |
 
-  The single settings are under **Advanced options** (closed); each choice fills them in.
+  The single settings are under **Advanced options** (closed); each choice fills them in (Blender: on the right of the
+  file browser).
 
   <p>
     <img src="src/Guide/Guide_images/max_import.png" alt="The 3ds Max import window" width="24%">
-    <img src="src/Guide/Guide_images/max_export.png" alt="The 3ds Max export window" width="24%">
+    <img src="src/Guide/Guide_images/blender_import_window.png" alt="The Blender import window" width="36%">
   </p>
-- **Blender:** **File → Import → Priston Tale / 3ds Max ASE (.ase)**.
 
 Characters and monsters come in skinned and animated. Pick a motion from the **PT Motions** list (3ds Max:
 **Priston Tale → Motions…**) or the **PT** tab of the side panel (press **N**, Blender) and press play.
@@ -233,7 +234,7 @@ Characters and monsters come in skinned and animated. Pick a motion from the **P
 
 <p>
   <img src="src/Guide/Guide_images/max_motions.png" alt="PT Motions in 3ds Max" width="49%">
-  <img src="src/Guide/Guide_images/blender_import_options.png" alt="The Blender importer" width="49%">
+  <img src="src/Guide/Guide_images/blender_import_options.png" alt="The Blender file browser with the import choice and options" width="49%">
 </p>
 
 Textures are found next to the `.ase`, anywhere in the converted output folder (also after you move or share it), or in
@@ -241,13 +242,13 @@ an **Extra texture folder** you pick; the game's own scrambled textures work the
 
 ### Export
 
-**Priston Tale → Export…** (3ds Max: *Selected objects* or *Everything in the scene*; keep *Include hidden objects*
-ticked for maps, their collision walls are hidden) or **File → Export → Priston Tale / 3ds Max ASE (.ase)** (Blender),
-with the **same name as the original `.smd`**. Keep *Copy textures* ticked. Then drop the `.ase` on **ENCODE**.
+**Priston Tale → Export…** in 3ds Max and Blender (Blender also **File → Export → Priston Tale (.ase)**): *Selected
+objects* or *Everything in the scene*; keep *Include hidden objects* ticked for maps, their collision walls are hidden.
+Save with the **same name as the original `.smd`**. Keep *Copy textures* ticked. Then drop the `.ase` on **ENCODE**.
 
 <p>
-  <img src="src/Guide/Guide_images/blender_7_export_menu.png" alt="Blender export menu" width="49%">
-  <img src="src/Guide/Guide_images/blender_export_options.png" alt="Blender export options" width="49%">
+  <img src="src/Guide/Guide_images/max_export.png" alt="The 3ds Max export window" width="30%">
+  <img src="src/Guide/Guide_images/blender_export_window.png" alt="The Blender export window" width="40%">
 </p>
 
 Characters and monsters are written with the mesh in its rest pose, every bone, which bone each vertex follows (the game

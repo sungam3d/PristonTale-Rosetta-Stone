@@ -48,7 +48,8 @@ QUICK START
 2b. Blender 4.2+
    Edit > Preferences > Get Extensions > last v (top right) > Install from Disk...
    > Blender\pt_ase_importer.zip
-   File > Import > Priston Tale / 3ds Max ASE (.ase)
+   Priston Tale menu > Import... / Export...: the same windows as in 3ds Max
+   (also File > Import / Export > Priston Tale); .smd / .smb open directly.
    Characters: press N in the 3D view, "PT" tab, click a motion.
 
 Both importers: Pose = Animated or T-pose (bind pose); "Animation file" picks a

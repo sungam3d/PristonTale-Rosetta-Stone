@@ -176,18 +176,32 @@ a character the Korean code page doesn't have.</p>
 <!-- ============================================================ IMPORT -->
 <h2 id="import">4. Import into Blender</h2>
 <ol class="steps">
-  <li><b>File → Import → Priston Tale / 3ds Max ASE (.ase)</b>.</li>
-  <li>Select one or more <code>.ase</code> files (<kbd>Ctrl</kbd>/<kbd>Shift</kbd>-click for several). Check the options on the right.</li>
-  <li>Click <b>Import PT ASE</b>. A progress bar runs at the bottom (<kbd>Esc</kbd> cancels). When it's done, the view zooms to what you
+  <li><b>Priston Tale → Import…</b> in the top menu bar (the same window as in 3ds Max).</li>
+  <li>Answer <i>What are you importing?</i> with one click:
+    <ul>
+      <li><b>Map - as seen in the game</b>: textures and baked lighting exactly as in the game; collision walls hidden.</li>
+      <li><b>Map - for editing and exporting</b>: collision walls visible in their own collection, lights included.</li>
+      <li><b>Character / monster - animated</b>: skeleton, skin and animation (armour uses its class file, e.g. <code>m1.smb</code>, found next to it).</li>
+      <li><b>Character / monster - T-pose, with bones</b>: skeleton and skin in the bind pose, no animation.</li>
+      <li><b>Character / monster - mesh only, no bones</b>: just the mesh.</li>
+      <li><b>Animation only - onto the character in the scene</b>: puts another animation (<code>m1.smb</code> … <code>m8.smb</code>, or a monster's) on the character you imported.</li>
+    </ul></li>
+  <li>Click <b>Import file(s)…</b> (or <b>Import a whole folder…</b>) and pick <code>.ase</code> files, or the game's
+      <code>.smd</code> / <code>.smb</code> straight from the game folder: they are converted on the way with
+      <code>PT_RosettaStone.exe</code>'s converter (start that program once after moving it).
+      <kbd>Ctrl</kbd>/<kbd>Shift</kbd>-click for several. The single settings are under <b>Advanced options</b> on the right;
+      the choice has filled them in. <b>File → Import → Priston Tale (.ase, .smd, .smb)</b> opens the same file browser directly.</li>
+  <li>Click <b>Import ASE</b>. A progress bar runs at the bottom (<kbd>Esc</kbd> cancels). When it's done, the view zooms to what you
       imported and switches to <b>Material Preview</b> so the textures show.</li>
 </ol>
 <div class="row">
-  <figure><img src="Guide_images/blender_3_import_menu.png" alt="File > Import menu"></figure>
-  <figure><img src="Guide_images/blender_import_options.png" alt="Import options on the right of the file browser">
-    <figcaption>The import options, on the right of the file browser.</figcaption></figure>
+  <figure><img src="Guide_images/blender_import_window.png" alt="Priston Tale - Import window">
+    <figcaption>Priston Tale → Import…: one click says what you are importing.</figcaption></figure>
+  <figure><img src="Guide_images/blender_import_options.png" alt="Import choice and options on the right of the file browser">
+    <figcaption>The file browser: the choice, and Advanced options (closed) on the right.</figcaption></figure>
 </div>
 <div class="table-wrap"><table>
-  <tr><th>Option</th><th>What it does</th></tr>
+  <tr><th>Advanced option</th><th>What it does</th></tr>
   <tr><td>Shading</td><td><i>Game look (unlit)</i> shows the model exactly as the game does and ignores your lights.
       <i>Lit (Principled)</i> keeps the textures and lets your own lights and sky shade it.</td></tr>
   <tr><td>Scale</td><td>Default 0.01, so a map is a few hundred metres across. Use the same value for everything so maps keep lining up.</td></tr>
@@ -300,27 +314,29 @@ bones, so on their own they open in T-pose. To animate them:</p>
 <!-- ============================================================ EXPORT -->
 <h2 id="export">10. Export</h2>
 <ol class="steps">
-  <li>Select the objects to export. For a map, select all of its objects. If it should keep its walls, enable the hidden
-      <code>&lt;map&gt;_collision</code> collection and select those too.</li>
-  <li><b>File → Export → Priston Tale / 3ds Max ASE (.ase)</b>.</li>
-  <li>Check the options and click <b>Export PT ASE</b>. Use the original name, for example <code>fore-1.ase</code>.</li>
+  <li><b>Priston Tale → Export…</b> (the same window as in 3ds Max), or <b>File → Export → Priston Tale (.ase)</b>.</li>
+  <li>Choose <b>Selected objects</b> or <b>Everything in the scene</b>. Keep <b>Include hidden objects</b> ticked for a
+      map: its collision walls are in a hidden collection and the game needs them.</li>
+  <li>Click <b>Export ASE…</b>, save with the original name, for example <code>fore-1.ase</code>, then drop it on
+      <b>ENCODE</b> (<a href="#game">section 11</a>).</li>
 </ol>
 <div class="row">
-  <figure><img src="Guide_images/blender_7_export_menu.png" alt="File > Export menu"></figure>
+  <figure><img src="Guide_images/blender_export_window.png" alt="Priston Tale - Export window"></figure>
   <figure><img src="Guide_images/blender_export_options.png" alt="Export options">
-    <figcaption>The export options, on the right of the file browser.</figcaption></figure>
+    <figcaption>The same options on the right of the file browser, Advanced options below.</figcaption></figure>
 </div>
 <div class="table-wrap"><table>
   <tr><th>Option</th><th>What it does</th></tr>
-  <tr><td>Selected objects only</td><td>Export the selection, or every visible object.</td></tr>
+  <tr><td>Selected objects / Everything in the scene</td><td>Export the selection, or every object.</td></tr>
+  <tr><td>Include hidden objects</td><td>Hidden objects too (a map's collision walls).</td></tr>
   <tr><td>Apply modifiers</td><td>Bake modifiers (mirror, subdivision, armature pose…) into the exported mesh.</td></tr>
   <tr><td>Vertex colours</td><td>Write the colour attribute (the game's lighting on imported maps).</td></tr>
   <tr><td>Point lights</td><td>Write point lights as lights.</td></tr>
-  <tr><td>Copy textures next to the .ase</td><td>Copy every texture into the export folder, ready for the game.</td></tr>
+  <tr><td>Copy textures next to the exported .ase</td><td>Copy every texture into the export folder, ready for the game.</td></tr>
   <tr><td>Scale (non-PT objects)</td><td>Only for objects you made yourself. 100 matches the importer's default 0.01.
       Imported models always export in exact game units.</td></tr>
   <tr><td>Skeleton + skin</td><td>Characters and monsters: write the bones and which bone each vertex follows.</td></tr>
-  <tr><td>Animation</td><td><i>Auto</i> (recommended), <i>Always</i> or <i>Never</i> — see below.</td></tr>
+  <tr><td>Characters: export animation</td><td><i>Auto</i> (recommended), <i>Always</i> or <i>Never</i> — see below.</td></tr>
 </table></div>
 <ul>
   <li>Material names hold the game's keywords (<code>wind:</code>, <code>wall:</code>, <code>BLEND_LAMP:</code> …). Keep them:

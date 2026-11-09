@@ -40,8 +40,7 @@ namespace PT_SMD2ASE
             {
                 if (!Supported) return L.T(App == "Blender" ? "plug.too_old_blender" : "plug.too_old_max");
                 if (!Installed) return L.T("plug.not_installed");
-                string v = InstalledVersion != null ? " (" + InstalledVersion + ")" : "";
-                return L.T(UpToDate ? "plug.up_to_date" : "plug.older", v);
+                return L.T(UpToDate ? "plug.up_to_date" : "plug.older", "");   // (no version numbers: they only confuse)
             }
         }
     }
@@ -378,10 +377,29 @@ namespace PT_SMD2ASE
             return (true, L.T("inst.max_ok", t.Name, string.Join(L.T("inst.and"), targets)) + after);
         }
 
+        /// <summary>The Blender add-on opens game files (.smd / .smb) with this program's converter: its
+        /// path goes to %APPDATA%\PT_SMD2ASE\converter.txt (written on install and at every start, so a
+        /// moved program folder is found again).</summary>
+        public static void WriteConverterPath()
+        {
+            try
+            {
+                string conv = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "smd2ase.exe");
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PT_SMD2ASE");
+                string file = Path.Combine(dir, "converter.txt");
+                if (!File.Exists(conv)) return;
+                if (File.Exists(file) && File.ReadAllText(file).Trim() == conv) return;
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(file, conv, new UTF8Encoding(false));
+            }
+            catch (Exception) { }
+        }
+
         static (bool, string) InstallBlender(PluginTarget t)
         {
             string zip = BlenderZip;
             if (zip == null) return (false, L.T("inst.zip_missing", BlenderZipName));
+            WriteConverterPath();
             var psi = new ProcessStartInfo(t.Exe, "-c extension install-file -r user_default -e \"" + zip + "\"")
             {
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,

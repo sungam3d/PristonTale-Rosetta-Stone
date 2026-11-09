@@ -47,6 +47,7 @@ def _p3(v):
 class ExportOptions(object):
     def __init__(self, **kw):
         self.selection_only = True
+        self.include_hidden = False      # also hidden objects (a map's collision walls; the game needs them)
         self.apply_modifiers = True
         self.scale = 100.0               # for objects without a PT root (inverse of the importer's 0.01)
         self.copy_textures = True
@@ -445,7 +446,7 @@ def export_ase(context, filepath, opts=None):
     if opts.selection_only:
         objs = [o for o in context.selected_objects]
     else:
-        objs = [o for o in context.view_layer.objects if o.visible_get()]
+        objs = [o for o in context.view_layer.objects if o.visible_get() or opts.include_hidden]
     meshes = [o for o in objs if o.type in ('MESH', 'CURVE', 'SURFACE', 'META', 'FONT')]
     # imported objects in their file order (three meshes all called "fi_d" in dfi), new ones after
     meshes.sort(key=lambda o: (0, o.get('ase_index', 0)) if 'ase_index' in o else (1, 0))
@@ -462,7 +463,7 @@ def export_ase(context, filepath, opts=None):
             if a is not None and a not in arms:
                 arms.append(a)
         for o in context.view_layer.objects:
-            if o.type == 'MESH' and o not in meshes and rig.armature_of(o) in arms and o.visible_get():
+            if o.type == 'MESH' and o not in meshes and rig.armature_of(o) in arms and (o.visible_get() or opts.include_hidden):
                 meshes.append(o)
     if not meshes and not lights and not arms:
         raise RuntimeError("Nothing to export: select one or more mesh objects")

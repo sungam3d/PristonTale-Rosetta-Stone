@@ -46,6 +46,7 @@ namespace PT_SMD2ASE
 
         public MainForm(string[] initial)
         {
+            Plugins.WriteConverterPath();                       // (the Blender add-on opens .smd / .smb with it)
             Text = AppName + "  v" + Application.ProductVersion;
             Font = new Font("Segoe UI", 9f);
             AutoScaleMode = AutoScaleMode.Font;
