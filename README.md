@@ -11,10 +11,22 @@ and compiled model info come out as ordinary files any program reads.
 
 *(Formerly "PT SMD → ASE Converter".)*
 
+### New in 1.5.0
+
+- **Both ways:** ENCODE now builds edited `.ase` maps and models back into the game's `.smd` / `.smb`, as the game's
+  own builder does (current clients and 2012 clients), with a warning where too many faces would crash the game.
+- **9 languages:** English, 한국어, 简体中文, 繁體中文, 日本語, ไทย, Tiếng Việt, Português (Brasil) and Español, for the
+  window, the log, the notes and both plug-ins.
+- **3ds Max plug-in reworked:** one-click import choices, an *Animation only* import onto a character, a separate
+  export window, and `.smd` / `.smb` opened straight from the game folder.
+- **Exact round trip:** vertex colours, material colours and model matrices now decode exactly, so decode → encode
+  gives the game's files back.
+
 ---
 
 ## Contents
 
+- [New in 1.5.0](#new-in-150)
 - [What it does](#what-it-does)
 - [Getting started](#getting-started)
 - [DECODE: game files → readable](#decode-game-files--readable)
@@ -37,6 +49,7 @@ and compiled model info come out as ordinary files any program reads.
 | **Sounds** | The game's `.wav` files start with `JODO` instead of `RIFF`. They come out playable, and so does the music (`.bgm`). |
 | **Text** | `.ini` `.inf` `.in` `.sin` `.msg` `.txt` `.lua` … are Korean in code page 949. They come out as UTF-8, readable in any editor. |
 | **Model info** | Every compiled `.inx` (monsters, NPCs, player models) is rebuilt as the `.ini` / `.inf` / `.in` it was made from: model files, detail levels, and every animation's frames and key events. |
+| **Languages** | The window, log, notes and plug-ins in English, Korean, Chinese (simplified and traditional), Japanese, Thai, Vietnamese, Brazilian Portuguese and Spanish. The guides are in English; a browser translator turns them into any language. |
 | **3ds Max and Blender plug-ins** | Import with textures, skeletons and animation in one click (map as in the game, map for editing, character animated or in T-pose, or just a new animation onto a character); export back to `.ase` in the same layout as the developers' own files. Installed with one click. |
 | **Back to the game** | Edited maps and models (`.ase`) are built into the game's `.smd` / `.smb` the way the game's own builder does it; model info, textures, sounds and text go back into the exact forms the game reads. Checked against the game's own builds: 41 maps and 337 models of 2012, and every map and model of a current client decoded and built again. The `.inx` compiler gives byte for byte the game's own (all 2 455 `.inx` files of a current client). |
 
