@@ -67,6 +67,8 @@ Source code:  Source\  (see Source\README_SOURCE.md)
               https://github.com/sungam3d/PristonTale-Rosetta-Stone
 Licence:      MIT (LICENSE.txt); the Blender add-on is GPL-3.0-or-later.
 
-Credits:      bobsobol's PT File Patcher (https://forum.ragezone.com/threads/pt-file-patcher.684994/)
+Credits:      Sandurr's SMD Reader (2010), the original .smd/.smb -> .ase converter, which the
+              model conversion here grew from.
+              bobsobol's PT File Patcher (https://forum.ragezone.com/threads/pt-file-patcher.684994/)
               first opened up the game's .tga/.bmp/.wav/.bgm files; the decoding here stands on it
               (and on Obscura's BMPPatcher and WAVPatcher that it built on).

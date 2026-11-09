@@ -307,6 +307,8 @@ their animation replaced yet. The game's own rebuild from `.ase` can only be tes
 
 ## Credits
 
+- **Sandurr** for **SMD Reader** (2010), the original `.smd` / `.smb` → `.ase` converter. Its source was
+  the first map of the game's model and bone files, and the model conversion here grew from it.
 - **[bobsobol](https://forum.ragezone.com/threads/pt-file-patcher.684994/)** for **PT File Patcher** (and TGAPatch
   before it), the tool that first made Priston Tale's `.tga`, `.bmp`, `.wav` and `.bgm` files open in ordinary image and
   sound editors, shared with its source on RaGEZONE. Rosetta Stone's texture and sound decoding stands on that work, and

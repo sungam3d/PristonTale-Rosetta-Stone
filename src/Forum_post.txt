@@ -97,7 +97,9 @@ smd2ase --to-game D:\PT-Readable\char\monster\Tees -o D:\PT-Game   edited files 
 smd2ase --help                                         every option[/CODE]
 
 [SIZE=5][B]Credits[/B][/SIZE]
-Big thanks to [B]bobsobol[/B] for [URL=https://forum.ragezone.com/threads/pt-file-patcher.684994/]PT File Patcher[/URL] (and TGAPatch before it) - the tool that first made Priston Tale's .tga, .bmp, .wav and .bgm files open in normal editors, shared with its source right here on RaGEZONE. Rosetta Stone's texture and sound decoding stands on that work, and on Obscura's BMPPatcher and WAVPatcher that it built on. And thanks to the PT community here for years of shared research.
+Big thanks to [B]Sandurr[/B] for [B]SMD Reader[/B] (2010), the original .smd / .smb -> .ase converter - its source was the first map of the game's model and bone files, and the model conversion here grew from it.
+
+And to [B]bobsobol[/B] for [URL=https://forum.ragezone.com/threads/pt-file-patcher.684994/]PT File Patcher[/URL] (and TGAPatch before it) - the tool that first made Priston Tale's .tga, .bmp, .wav and .bgm files open in normal editors, shared with its source right here on RaGEZONE. Rosetta Stone's texture and sound decoding stands on that work, and on Obscura's BMPPatcher and WAVPatcher that it built on. And thanks to the PT community here for years of shared research.
 
 [B]Download:[/B] [URL]https://github.com/sungam3d/PristonTale-Rosetta-Stone/releases/latest[/URL]
 [B]Source code[/B] (MIT; the Blender add-on GPL-3.0): [URL]https://github.com/sungam3d/PristonTale-Rosetta-Stone[/URL]
