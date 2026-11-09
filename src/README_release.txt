@@ -1,4 +1,4 @@
-PristonTale - Rosetta Stone  v1.4.0
+PristonTale - Rosetta Stone  v1.4.1
 ===================================
 
 Turns Priston Tale game files (.smd) into .ase files for 3ds Max and Blender:
@@ -22,12 +22,14 @@ QUICK START
 
    Drop the whole game folder (or any folder with sounds, text or .inx in it)
    and every kind of file is converted, in the game's own folder layout:
-     .smd -> .ase    .bmp/.tga -> normal images    .wav -> playable (.bgm -> .wav)
+     .smd -> .ase    .bmp/.tga -> normal images    .wav -> playable (X.bgm -> X.bgm.wav)
      .inf .ini .in .sin .msg .txt .lua -> UTF-8 text
      .inx (monster/NPC/player model info) -> the .ini/.inf/.in it was built from
      _server\  the model info again in the game's Korean code page (for the server)
    The ENCODE box (right) does the reverse for edited files:
-     .ini/.inf/.in -> .inx, .wav/.bmp/.tga -> the game's headers.
+     .ini/.inf/.in -> .inx, .wav/.bmp/.tga -> the game's headers, in the layout the
+     game's loaders read (RLE TGAs unpacked etc.). Read the "note" lines in the log:
+     they name what the game would not read as you meant (unknown weapon names ...).
    Keep the game's folder names (char\monster\...): the .inx stores a checksum of its path.
 
 2. Plug-ins: the window lists 3ds Max and Blender found on this PC, with an
@@ -62,5 +64,9 @@ Artist) and keep the originals in that folder or pick the file - see the guides.
 
 Command line: smd2ase.exe --help
 Source code:  Source\  (see Source\README_SOURCE.md)
-              https://github.com/sungam3d/Pristontale-SMD-to-ASE-Converter
+              https://github.com/sungam3d/PristonTale-Rosetta-Stone
 Licence:      MIT (LICENSE.txt); the Blender add-on is GPL-3.0-or-later.
+
+Credits:      bobsobol's PT File Patcher (https://forum.ragezone.com/threads/pt-file-patcher.684994/)
+              first opened up the game's .tga/.bmp/.wav/.bgm files; the decoding here stands on it
+              (and on Obscura's BMPPatcher and WAVPatcher that it built on).

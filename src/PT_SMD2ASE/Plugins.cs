@@ -27,7 +27,8 @@ namespace PT_SMD2ASE
         public bool Installed, UpToDate;
         public string Where;          // where the plug-in is (or would go)
         public string InstalledVersion;
-        internal string SystemStartup, UserStartup;
+        internal string SystemStartup, UserStartup;      // UserStartup: the default language's
+        internal List<string> UserStartups = new List<string>();   // every language folder Max made (UserStartup first)
 
         public string Name => App + " " + Version;
 
@@ -108,6 +109,32 @@ namespace PT_SMD2ASE
             }
         }
 
+        /// <summary>Every file of the bundled zip is in folder with the same bytes (so an add-on that
+        /// changed without a new version number is still offered as an update).</summary>
+        static bool SameAsBundled(string folder)
+        {
+            try
+            {
+                using (var z = new ZipArchive(File.OpenRead(BlenderZip), ZipArchiveMode.Read))
+                    foreach (var e in z.Entries)
+                    {
+                        if (e.Name.Length == 0) continue;                           // (a folder)
+                        string p = Path.Combine(folder, e.FullName.Replace('/', '\\'));
+                        if (!File.Exists(p) || new FileInfo(p).Length != e.Length) return false;
+                        var a = File.ReadAllBytes(p);
+                        var b = new byte[e.Length];
+                        using (var s = e.Open())
+                        {
+                            int n = 0, k;
+                            while (n < b.Length && (k = s.Read(b, n, b.Length - n)) > 0) n += k;
+                        }
+                        if (!a.SequenceEqual(b)) return false;
+                    }
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
         // ------------------------------------------------------------------ detection
         public static List<PluginTarget> Detect()
         {
@@ -134,14 +161,27 @@ namespace PT_SMD2ASE
                         if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) continue;
                         int year = 1998 + int.Parse(m.Groups[1].Value);
                         string lang = (k.GetValue("DefaultLanguage") as string) ?? "ENU";
+                        string userRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                                                       "Autodesk", "3dsMax", year + " - 64bit");
                         var t = new PluginTarget
                         {
                             App = "3ds Max", Version = year.ToString(), Exe = Path.Combine(dir, "3dsmax.exe"),
                             Supported = year >= 2020,
                             SystemStartup = Path.Combine(dir, "scripts", "startup"),
-                            UserStartup = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                                                       "Autodesk", "3dsMax", year + " - 64bit", lang, "scripts", "startup"),
+                            UserStartup = Path.Combine(userRoot, lang, "scripts", "startup"),
                         };
+                        // Max started in another language (its language shortcuts) reads that language's folder
+                        t.UserStartups.Add(t.UserStartup);
+                        try
+                        {
+                            foreach (var d in Directory.GetDirectories(userRoot))
+                            {
+                                string n = Path.GetFileName(d);
+                                if (n.Length == 3 && n.All(char.IsLetter) && !n.Equals(lang, StringComparison.OrdinalIgnoreCase))
+                                    t.UserStartups.Add(Path.Combine(d, "scripts", "startup"));
+                            }
+                        }
+                        catch (Exception) { }
                         CheckMax(t);
                         found.Add(t);
                     }
@@ -154,12 +194,13 @@ namespace PT_SMD2ASE
         {
             string src = MaxSource;
             bool inSystem = File.Exists(Path.Combine(t.SystemStartup, MaxFiles[0]));
-            bool inUser = File.Exists(Path.Combine(t.UserStartup, MaxFiles[0]));
-            t.Installed = inSystem || inUser;
+            var users = t.UserStartups.Where(u => File.Exists(Path.Combine(u, MaxFiles[0]))).ToList();
+            t.Installed = inSystem || users.Count > 0;
             t.Where = inSystem ? t.SystemStartup : t.UserStartup;
+            // every copy Max may load must be the current one
             t.UpToDate = t.Installed && src != null &&
                          (!inSystem || MaxFiles.All(f => SameFile(Path.Combine(src, f), Path.Combine(t.SystemStartup, f)))) &&
-                         (!inUser || MaxFiles.All(f => SameFile(Path.Combine(src, f), Path.Combine(t.UserStartup, f))));
+                         users.All(u => MaxFiles.All(f => SameFile(Path.Combine(src, f), Path.Combine(u, f))));
         }
 
         static IEnumerable<PluginTarget> FindBlender()
@@ -212,7 +253,7 @@ namespace PT_SMD2ASE
                 {
                     t.Installed = true;
                     try { t.InstalledVersion = ManifestVersion(File.ReadAllText(manifest)); } catch (Exception) { }
-                    t.UpToDate = want != null && t.InstalledVersion == want;
+                    t.UpToDate = want != null && t.InstalledVersion == want && SameAsBundled(ext);
                 }
                 found.Add(t);
             }
@@ -246,8 +287,12 @@ namespace PT_SMD2ASE
             string src = MaxSource;
             if (src == null) return (false, "The 3dsMax plug-in files were not found next to PT_RosettaStone.exe (3dsMax folder).");
             var targets = new List<string>();
-            if (File.Exists(Path.Combine(t.SystemStartup, MaxFiles[0]))) targets.Add(t.SystemStartup);   // update the old copy where it is
-            if (File.Exists(Path.Combine(t.UserStartup, MaxFiles[0])) || targets.Count == 0) targets.Add(t.UserStartup);
+            bool inSystem = File.Exists(Path.Combine(t.SystemStartup, MaxFiles[0]));
+            if (inSystem) targets.Add(t.SystemStartup);                                   // update the old copy where it is
+            // the user's own folders: copies already there are updated; without a system copy, every
+            // language folder Max made gets one (Max started in that language reads only its own)
+            foreach (var u in t.UserStartups)
+                if (File.Exists(Path.Combine(u, MaxFiles[0])) || !inSystem) targets.Add(u);
             foreach (var dir in targets)
             {
                 try

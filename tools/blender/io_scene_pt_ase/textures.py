@@ -11,6 +11,26 @@ import os
 import shutil
 
 
+def tga_header_ok(h, file_len):
+    """An 18-byte TGA header a reader can use: a known image type, a usual pixel size and
+    (uncompressed) pixels that fit in a file of file_len bytes."""
+    id_len, cmap, typ = h[0], h[1], h[2]
+    w, ht, bpp = h[12] | h[13] << 8, h[14] | h[15] << 8, h[16]
+    if cmap > 1 or typ not in (1, 2, 3, 9, 10, 11):
+        return False
+    if w == 0 or ht == 0 or bpp not in (8, 15, 16, 24, 32):
+        return False
+    if typ in (2, 3) and 18 + id_len + w * ht * ((bpp + 7) // 8) > file_len:
+        return False
+    return True
+
+
+def bmp_header_ok(h, file_len):
+    """A BMP file header (14 bytes) whose pixel offset lies inside a file of file_len bytes."""
+    pix = int.from_bytes(h[10:14], 'little')
+    return 26 <= pix < file_len
+
+
 def decode_texture_bytes(data):
     """Return (decoded_bytes, kind) where kind is 'bmp', 'tga' or None (unchanged)."""
     if len(data) < 18:
@@ -20,6 +40,14 @@ def decode_texture_bytes(data):
         head[0:2] = b'BM'
         for i in range(2, 14):
             head[i] = (head[i] - i * i) & 0xFF
+        # scrambled twice (StartImage\...\Mokoba.BMP): the pixel offset points past the end once
+        # undone; twice, size and offset are right
+        if not bmp_header_ok(head, len(data)):
+            twice = bytearray(14)
+            for i in range(2, 14):
+                twice[i] = (head[i] - i * i) & 0xFF
+            if bmp_header_ok(twice, len(data)) and int.from_bytes(twice[2:6], 'little') == len(data):
+                head[2:14] = twice[2:14]
         return bytes(head) + data[14:], 'bmp'
     if head[0:2] == b'G8':
         head = bytearray(data[:18])
@@ -27,6 +55,14 @@ def decode_texture_bytes(data):
         head[1] = 0
         for i in range(2, 18):
             head[i] = (head[i] - i * i) & 0xFF
+        # some client TGAs were scrambled twice (Field\castle, Fall_Game, Iron): once undone
+        # they still have no sane header, twice they do
+        if not tga_header_ok(head, len(data)):
+            twice = bytearray(18)
+            for i in range(2, 18):
+                twice[i] = (head[i] - i * i) & 0xFF
+            if tga_header_ok(twice, len(data)):
+                head[2:18] = twice[2:18]
         return bytes(head) + data[18:], 'tga'
     if head[0:2] == b'BM':
         # Already plain BMP.  Some third-party decoders leave a garbage

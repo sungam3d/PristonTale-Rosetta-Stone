@@ -22,7 +22,7 @@ namespace PT_SMD2ASE
 
             if (args.Length >= 5 && args[0] == "--selftest")
             {
-                SelfTest(args[1], args[2], args[3], args[4], args.Length > 5 ? args[5] : null);
+                SelfTest(args[1], args[2], args[3], args[4], args.Length > 5 ? args[5] : null, args.Length > 6 ? args[6] : null);
                 return;
             }
             // files/folders dropped onto the exe icon arrive as arguments
@@ -37,7 +37,7 @@ namespace PT_SMD2ASE
 
         /// <summary>Drives the real window: folder (warning + gating), then a single file, then (optional) a
         /// whole game folder. Screenshots to shotDir.</summary>
-        static void SelfTest(string outDir, string folder, string file, string shotDir, string client)
+        static void SelfTest(string outDir, string folder, string file, string shotDir, string client, string encodeDir)
         {
             MainForm.QuietForTests = true;
             var f = new MainForm(null);
@@ -92,7 +92,7 @@ namespace PT_SMD2ASE
                         if (f.TestBusy) break;
                         report.AppendLine("game folder done: " + f.TestStatus);
                         Shot("cs_gui_5_client_done.png");
-                        f.TestEncode(new[] { outDir });                             // the readable copies back to game format
+                        f.TestEncode(new[] { encodeDir ?? outDir });                           // the readable copies back to game format
                         step++;
                         break;
                     case 6:

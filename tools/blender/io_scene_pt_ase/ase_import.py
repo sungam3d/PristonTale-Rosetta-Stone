@@ -146,6 +146,23 @@ class ImageCache(object):
         self.images = {}
         self.missing = set()
 
+    def _moved(self, path):
+        """A converter output folder that was moved or shared keeps its layout, but the .ase still
+        names the old place: find the end of the old path below one of the .ase's folders
+        (<out>\\textures\\Field\\... from <out>\\Field\\forest\\x.ase; char\\npc\\... in a whole-folder copy)."""
+        parts = [p for p in path.replace('\\', '/').split('/') if p][1:]   # (not the old drive)
+        d = self.ase_dir
+        for _ in range(8):
+            for k in range(min(len(parts), 8), 1, -1):
+                c = os.path.join(d, *parts[-k:])
+                if os.path.isfile(c):
+                    return c
+            up = os.path.dirname(d)
+            if up == d:
+                break
+            d = up
+        return None
+
     def _locate(self, path):
         if not path:
             return None
@@ -160,6 +177,9 @@ class ImageCache(object):
         for c in cands:
             if c and os.path.isfile(c):
                 return c
+        moved = self._moved(path)
+        if moved:
+            return moved
         # the converter's "textures" folder next to the .ase (any depth), by file name
         if not hasattr(self, '_index'):
             self._index = {}

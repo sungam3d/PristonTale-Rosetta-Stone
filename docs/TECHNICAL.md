@@ -246,7 +246,9 @@ current client (5.4 GB): 12 646 `.bmp`, 5 441 `.tga`, 4 306 `.smd`, 2 825 `.wav`
 645 `.part`, 541 `.sin`, 263 `.ini`, 237 `.msg`, 11 `.bgm`.
 
 **Sounds.** 2 720 of the `.wav` files start with `JODO` where a wave file has `RIFF`; nothing else differs (the sizes
-in the header are right). `.bgm` music files are ordinary waves.
+in the header are right); 105 are plain `RIFF` already. `.bgm` music files are ordinary waves; the readable copy is
+`Name.bgm.wav` (it plays anywhere, and goes back as `Name.bgm` - `wav\Sod\BGM` holds music and sound effects side by
+side, so the folder can't tell them apart).
 
 **Text.** `.inf .ini .in .sin .msg .txt .lua .cht` are Korean in code page 949 (none are UTF-8; `.part` particle
 scripts are ASCII). The readable copies are UTF-8 with a byte-order mark; ASCII files and anything that isn't clean
@@ -292,7 +294,47 @@ identical; the rest differ only in the stored folder's upper/lower case (the gam
 case-blind), in using the current 172-byte layout for the 21 old ones (`--inx-layout 120` keeps it), or (`Lilly.inx`)
 in having been copied from another NPC's folder.
 
-## Status (v1.4.0)
+### Back to game format: what the game's loaders accept
+
+The game's loaders (2012 source) are much stricter than image and sound editors, so `--to-game` / ENCODE puts edited
+files into the one layout each loader reads, and says so in a note when it changes something or when the game will
+not read a file as meant:
+- **TGA** (`smTexture.cpp` `cTGA::LoadTga`): reads the 18-byte header and then raw pixels - it ignores the image type,
+  the image ID and the colour map, and has no RLE. Editors often save RLE (GIMP does by default): RLE is unpacked, an ID
+  field / colour map is left out, grey images become 24/32-bit. 16, 24 and 32-bit only.
+- **BMP** (`LoadDib`): reads `bfSize` bytes and takes the pixels right after the info header and palette - it ignores
+  `bfOffBits`, and reads rows bottom-up. `bfSize` is set, pixels are moved behind the header (BI_BITFIELDS 32-bit with
+  the usual masks included), top-down files are flipped. 8, 24 and 32-bit, uncompressed.
+- **WAV** (`Dxwav.cpp` `CreateBufferFromWaveFile`): ignores the first 4 bytes and doesn't walk the RIFF chunks - it
+  wants the 16-byte `fmt ` at byte 12, then `data` (or one `fact` chunk; or an 18-byte `fmt ` + `fact`). Files with
+  `LIST` / `bext` / `JUNK` chunks or `WAVE_FORMAT_EXTENSIBLE` (most editors) are rewritten to `fmt` + `data`; it always
+  plays PCM, so float or 24-bit sound gets a note.
+- **Text**: UTF-8 and UTF-16 (Notepad's "Unicode") are read; characters code page 949 has no place for are named
+  in a note (they become `?`). The `.ini` compiler names what the game would skip silently: unknown weapons, classes,
+  skills, commands, and `// comments` after a motion's frames (the game reads them as the key letter `/`).
+- Inside a dropped output folder, `_server\` (the decoder's unedited copy of the model info) and `game_format\` are
+  left out - before, the `_server` copy came last and overwrote the edited `.ini` and its `.inx`.
+
+Whole client through the readable copies and back: the `.bmp` / `.tga` / `.wav` / `.bgm` / text files come back byte
+for byte, apart from what the game can't read as shipped (the twice-scrambled textures and RLE TGAs below, a wave with
+a `PAD ` chunk), the 105 `RIFF` waves (now `JODO`, which the loader ignores) and 5 BMPs that were unscrambled (`BM`) or
+had a wrong `bfSize` (only the 14-byte file header differs).
+
+**Twice-scrambled textures.** 131 TGAs in `Field\castle`, `Field\Fall_Game` and `Field\Iron` (`do01.tga`,
+`eye_door01.tga` … used by `crystal_ani*.smd`) had their header scrambled twice: undone once, the header still makes
+no sense (type 6, 43 280 × 58 052 pixels); undone twice it is a normal TGA. Two BMPs too
+(`StartImage\Opening\GameServerSelect\Mokoba.BMP`, `Mokoba_U.BMP`: once undone, the pixels would start 2.8 GB into a
+10 KB file). The decoders (converter, both importers) undo it again when the first pass gives no sane header. 9 TGAs
+are RLE, which the 2012 loader can't read either.
+
+**Game folder.** Paths are kept from the nearest folder that looks like a game folder (two or more of `char`,
+`Field`, `image`, `Effect`, `wav` …): the client has folders named like top ones inside others (`Effect\Sky\Field`,
+`image\Sinimage\Effect`, `StartImage\sky`), and `Effect\Sky\Field\Lost\lostisland.smd` used to be written over the
+real `Field\Lost\lostisland.ase`. Textures found next to a model (when the path in the `.smd` is wrong) keep their
+place below the game folder too: 18 names are used by different pictures in different folders (`eveninghill.tga` in
+six sky folders), and the first one used to stand in for all of them.
+
+## Status (v1.4.1)
 
 Done and verified (see `src\README_SOURCE.md` for the check list):
 1. Converter (C# exe + Python reference, byte-identical): skeleton lookup (`.inx`/`.ini` → class skeleton from the file

@@ -488,9 +488,37 @@ namespace PTSmd
         // same-named models overwrote each other)
         static readonly string[] GameTopFolders = { "field", "char", "image", "effect" };
 
+        /// <summary>Folders found right inside a game folder (a game folder, or a copy of one, holds two or more).</summary>
+        static readonly string[] ClientTopFolders = { "char", "field", "image", "effect", "wav", "sky", "rain", "weapons", "cselect", "startimage" };
+        static readonly Dictionary<string, bool> clientCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>True when dir holds at least two of char, Field, image, Effect, wav ... (cached).</summary>
+        public static bool LooksLikeClient(string dir)
+        {
+            lock (clientCache)
+                if (clientCache.TryGetValue(dir, out bool known)) return known;
+            int n = 0;
+            try
+            {
+                foreach (var d in Directory.GetDirectories(dir))
+                    if (Array.Exists(ClientTopFolders, t => string.Equals(Path.GetFileName(d), t, StringComparison.OrdinalIgnoreCase))) n++;
+            }
+            catch (Exception) { }
+            lock (clientCache) clientCache[dir] = n >= 2;
+            return n >= 2;
+        }
+
+        public static void ClearClientCache() { lock (clientCache) clientCache.Clear(); }
+
+        /// <summary>The game folder a file belongs to: the nearest folder above it that looks like a
+        /// game folder (some game folders hold folders named like top ones: Effect\Sky\Field,
+        /// image\Sinimage\Effect, StartImage\sky), else the folder above the nearest Field / char /
+        /// image / Effect (a copy of single folders), else the file's own folder.</summary>
         public static string GuessGameRoot(string path)
         {
             string start = Path.GetDirectoryName(Path.GetFullPath(path));
+            for (string a = start; a != null; a = Path.GetDirectoryName(a))
+                if (LooksLikeClient(a)) return a;
             string d = start;
             while (true)
             {
@@ -1017,15 +1045,17 @@ namespace PTSmd
                 if (opt.TextureDirOverride != null)
                 {
                     outp = Path.Combine(opt.TextureDirOverride, (src != null ? Path.GetFileName(src) : rel.Split('/').Last()));
-                    if (src != null && opt.TextureOut != null && !File.Exists(outp)) Textures.DecodeFile(src, outp);
+                    if (src != null && opt.TextureOut != null) Textures.DecodeIfNeeded(src, outp);
                 }
                 else if (opt.TextureOut != null)
                 {
+                    // (a texture found next to the model keeps its place below the game folder too:
+                    // same-named ones of other folders - sky day / evening / night ... - differ)
                     string relpath = src != null
-                        ? (found.root != null ? (RelPath(src, found.root) ?? Path.GetFileName(src)) : Path.GetFileName(src))
+                        ? (RelPath(src, found.root ?? root) ?? Path.GetFileName(src))
                         : rel;
                     outp = Path.Combine(opt.TextureOut, relpath.Replace('/', '\\'));
-                    if (src != null && !File.Exists(outp)) Textures.DecodeFile(src, outp);
+                    if (src != null) Textures.DecodeIfNeeded(src, outp);
                 }
                 else outp = src ?? Path.Combine(root, rel.Replace('/', '\\'));
                 sc.TexturePaths[n] = Path.GetFullPath(outp).Replace('/', '\\');

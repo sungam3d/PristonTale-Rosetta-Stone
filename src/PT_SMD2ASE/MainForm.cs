@@ -14,7 +14,9 @@ namespace PT_SMD2ASE
     public class MainForm : Form
     {
         const string AppName = "PristonTale - Rosetta Stone";
-        const double MbPerSec = 15.0;       // measured: whole client (440 MB of SMD) in ~25 s incl. textures
+        // measured (2026-11): maps ~10 MB of .smd a second, characters / monsters ~3; the whole client
+        // (876 MB .smd, 2.5 GB textures + sounds) in 6 min 43 s
+        const double MbPerSec = 5.0, ModelMbPerSec = 3.0, RestMbPerSec = 25.0;
 
         readonly Settings st = Settings.Load();
         readonly Label drop, dropEnc;          // decode (game -> readable), encode (readable -> game)
@@ -226,6 +228,12 @@ namespace PT_SMD2ASE
 
         void InstallPlugin(PluginTarget t, Button b)
         {
+            // a running Blender that saves its preferences on quit would switch the new add-on off again
+            if (t.App == "Blender" && Process.GetProcessesByName("blender").Length > 0 && !QuietForTests &&
+                MessageBox.Show(this, "Blender is open. Please close it first: when Blender saves its preferences on quit, " +
+                                      "it can switch the newly installed add-on off again.\n\nInstall anyway?", AppName,
+                                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                return;
             b.Enabled = false;
             string was = b.Text;
             b.Text = "Installing…";
@@ -394,6 +402,7 @@ namespace PT_SMD2ASE
 
         void ShowSelection()
         {
+            Converter.ClearClientCache();                       // (folders may have changed since the last drop)
             pending = Batch.Collect(inputs);
             scan = null;
             chkOk.Checked = false;
@@ -467,7 +476,7 @@ namespace PT_SMD2ASE
             int count = scan.Files.Count;
             if (count > 1 || inputs.Any(Directory.Exists))
             {
-                double est = smdMb / MbPerSec + restMb / 150 + scan[ClientConvert.FileKind.Text] / 1000.0 + 1;
+                double est = smdMb / ModelMbPerSec + restMb / RestMbPerSec + scan[ClientConvert.FileKind.Text] / 1000.0 + 1;
                 double outMb = smdMb * 3.4 + restMb;
                 warnLbl.Text = string.Format(
                     "⚠  Converting {0} may take some time - roughly {1} - and writes about {2} into the output folder, " +
@@ -489,33 +498,56 @@ namespace PT_SMD2ASE
         void OnEncode(string[] paths)
         {
             if (Busy) { Log("Busy - wait for the current conversion to finish.", Warn); return; }
+            paths = paths.Select(Path.GetFullPath).ToArray();
+            Converter.ClearClientCache();                       // (folders may have changed since the last drop)
             string outDir = Path.GetFullPath(Path.Combine(OutDir, "game_format")).TrimEnd('\\');
-            // (dropping the output folder itself must not re-encode an earlier game_format)
-            var files = new List<string>();
-            foreach (var p in paths.Select(Path.GetFullPath))
-            {
-                if (Directory.Exists(p)) files.AddRange(Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories));
-                else if (File.Exists(p)) files.Add(p);
-            }
-            files = files.Where(f => !f.StartsWith(outDir + "\\", StringComparison.OrdinalIgnoreCase)).ToList();
             string names = Path.GetFileName(paths[0].TrimEnd('\\')) + (paths.Length > 1 ? " (+" + (paths.Length - 1) + " more)" : "");
+            // the game folder itself is not edited files (it would copy the whole client)
+            string game = paths.FirstOrDefault(p => Directory.Exists(p) && ClientConvert.LooksLikeClient(p) && Directory.EnumerateFiles(p, "*.exe").Any());
+            if (game != null)
+            {
+                SetEncText("That is the game folder itself - drop the folder with your edited files");
+                Log("ENCODE is for the files you edited (in the output folder, " + OutDir + "). " + game +
+                    " is the game folder: drop it on DECODE to get readable copies.", Warn);
+                return;
+            }
+            // (inside a dropped output folder, _server and an earlier game_format are left out)
+            var files = ClientConvert.ToGameFiles(paths, outDir);
             if (files.Count == 0) { SetEncText("Nothing to encode in " + names + "."); return; }
             SetEncText("Encoding " + names + " …");
             Log("=== Encoding back to game format: " + files.Count + " file(s) -> " + outDir + " ===", Head);
+            bool quiet = files.Count > 300;                       // (a whole folder: notes and errors only)
+            prog.Maximum = Math.Max(1, files.Count);
+            prog.Value = 0;
             cts = new CancellationTokenSource();
+            var token = cts.Token;
+            int lastShown = -1;
             worker = Task.Run(() =>
             {
                 ClientConvert.ToGameResult r;
-                try { r = ClientConvert.ToGame(files, outDir, (line, ok) => BeginInvoke(new Action(() => Log(line, ok ? Ok : Warn)))); }
+                try
+                {
+                    r = ClientConvert.ToGame(files, outDir,
+                        (line, ok) => { if (!ok || !quiet) BeginInvoke(new Action(() => Log(line, ok ? Ok : Warn))); }, 172,
+                        (i, n, rel) =>
+                        {
+                            if (i - lastShown < 25 && i < n) return;              // (don't flood the window)
+                            lastShown = i;
+                            BeginInvoke(new Action(() => { status.Text = string.Format("({0}/{1}) {2}", Math.Min(i + 1, n), n, rel); SetProgress(i); }));
+                        },
+                        token);
+                }
                 catch (Exception ex) { BeginInvoke(new Action(() => Log("Unexpected error: " + ex.Message, Err))); r = new ClientConvert.ToGameResult(); }
                 BeginInvoke(new Action(() =>
                 {
                     worker = null;
-                    Log("=== " + r.Summary() + " ===", r.Failed > 0 ? Err : Head);
+                    if (!r.Cancelled) SetProgress(prog.Maximum);
+                    Log("=== " + r.Summary() + (r.Cancelled ? " (cancelled)" : "") + " ===", r.Failed > 0 ? Err : Head);
+                    if (r.Notes > 0) Log("Read the notes above: they say what was put right, or what the game will not read as you meant.", Warn);
                     status.Text = "Done: " + r.Summary();
                     SetEncText("Done: " + r.Summary());
                     UpdateButtons();
-                    if (!QuietForTests) OpenFolder(outDir);
+                    if (!QuietForTests && !r.Cancelled && r.Inx + r.Sounds + r.Textures + r.Texts > 0) OpenFolder(outDir);
                 }));
             });
             UpdateButtons();

@@ -155,7 +155,7 @@ Everything comes out readable, in the game's own folder layout:</p>
   <tr><th>Game file</th><th>Becomes</th></tr>
   <tr><td><code>.smd</code></td><td><code>.ase</code> (as above)</td></tr>
   <tr><td><code>.bmp</code> / <code>.tga</code></td><td>Normal images, next to their models</td></tr>
-  <tr><td><code>.wav</code> sound effects</td><td>Playable waves (the game scrambles their first 4 bytes). Music (<code>.bgm</code>) is saved as <code>.wav</code>.</td></tr>
+  <tr><td><code>.wav</code> sound effects</td><td>Playable waves (the game scrambles their first 4 bytes). Music (<code>Name.bgm</code>) is saved as <code>Name.bgm.wav</code>.</td></tr>
   <tr><td><code>.inf</code> <code>.ini</code> <code>.in</code> <code>.sin</code> <code>.msg</code> <code>.txt</code> <code>.lua</code></td><td>Korean text, saved as UTF-8 so any editor shows it</td></tr>
   <tr><td><code>.inx</code></td><td>The compiled model info of monsters, NPCs and player models, rebuilt as the <code>.ini</code> /
       <code>.inf</code> / <code>.in</code> it was made from: model files, detail levels, and every animation with its frames and key events</td></tr>
@@ -163,7 +163,12 @@ Everything comes out readable, in the game's own folder layout:</p>
 </table></div>
 <p>The <b>Encode</b> box (top right) goes the other way for files you edited, straight away:
 <code>.ini</code> / <code>.inf</code> / <code>.in</code> → <code>.inx</code>, <code>.wav</code>, <code>.bmp</code> and <code>.tga</code> → the game's own headers,
-written to <code>game_format</code> in the output folder. Keep the game's folder names (<code>char\monster\…</code>): an <code>.inx</code> stores a checksum of its own path.</p>
+written to <code>game_format</code> in the output folder. Keep the game's folder names (<code>char\monster\…</code>): an <code>.inx</code> stores a checksum of its own path.
+You can drop the whole output folder: its <code>_server</code> copy is left out.</p>
+<p>The game reads pictures and sounds in fewer layouts than editors write, so Encode puts them right where it can
+(RLE-packed TGAs from GIMP are unpacked, extra chunks in waves are left out …). Read the <b>note</b> lines in the log:
+they say what was changed, or what the game will not read as you meant - an unknown weapon or skill name, a float wave,
+a character the Korean code page doesn't have.</p>
 <figure><img src="Guide_images/convert_whole.png" alt="Converter with the Decode and Encode boxes"></figure>
 
 <!-- ============================================================ IMPORT -->
@@ -362,8 +367,8 @@ animated models, the <code>.smb</code>) itself when it starts.</p>
   <ul style="margin:0;padding-left:20px">
     <li>For maps going back into the game, convert with <b>Baked vertex lighting</b> unticked, or export with
         <b>Vertex colours</b> unticked. Otherwise the game lights them twice.</li>
-    <li>If the game shows black or missing textures, scramble them the way the game expects with
-        <code>smd2ase.exe --encode-textures "&lt;game folder of the model&gt;"</code>.</li>
+    <li>If the game shows black or missing textures, drop them on the <b>ENCODE</b> box first: it puts them into the
+        form the game's loader reads (and its notes say if the game can't read one).</li>
     <li>For monsters with a separate motion file, the model (mesh and skin) can be changed; their animation can't be replaced yet.</li>
     <li>The exported files have the same layout as the developers' own files, but the game's rebuild step itself can only
         be tested in the game. Try one file first, and keep your backups.</li>
@@ -385,6 +390,12 @@ next to the <code>.ase</code> or picked under <b>Animation file</b>.</p>
 <p>Use <b>View → Frame All</b> (<kbd>Home</kbd>). Maps sit far from the centre of the scene.</p>
 <h3>The PT tab is empty</h3>
 <p>Select the character's Armature (or its mesh). The list only shows for an imported character or monster with animation.</p>
+
+<h2 id="credits">Credits</h2>
+<p>Thanks to <b>bobsobol</b> for <a href="https://forum.ragezone.com/threads/pt-file-patcher.684994/">PT File Patcher</a>
+(and TGAPatch before it), the tool that first made Priston Tale's <code>.tga</code>, <code>.bmp</code>, <code>.wav</code> and
+<code>.bgm</code> files open in ordinary editors, shared with its source on RaGEZONE. The texture and sound decoding here
+stands on that work, and on Obscura's BMPPatcher and WAVPatcher that it built on.</p>
 
 </main>
 </body>

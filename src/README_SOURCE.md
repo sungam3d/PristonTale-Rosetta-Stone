@@ -1,4 +1,4 @@
-# PT SMD → ASE: source code (v1.4.0)
+# PristonTale - Rosetta Stone: source code (v1.4.1)
 
 Everything needed to rebuild the release:
 - the converter, in C# (shipped) and in Python (reference);
@@ -66,7 +66,8 @@ The 3ds Max scripts need no build step. `PT_ASE_Importer.ms` compiles `PT_ASE_Re
 | Every .inx of the current client (2455): decompile → compile, Python and C# | `scripts\check_inx.py`, `smd2ase.exe --check-inx <client>` | all byte-identical |
 | Shipped .ini / .inf / .in → .inx (847) | `scripts\check_inx.py` | 839 identical; the other 8 (M1Bip–M8Bip.in) are older than their .inx |
 | Whole-folder output (sounds, text, model info, _server), C# (net48 and net8) vs Python | `scripts\compare_clientfiles.py` | 9486 files identical |
-| Readable copies → `--to-game` → .inx vs the client's | (see TECHNICAL.md) | identical apart from folder-name case / old 120-byte layout |
+| Whole client → readable → `--to-game`, vs the client's own files; C# texture decode vs Python | `scripts\roundtrip_client.py` | textures, sounds, music, text byte-identical apart from what the game can't read as shipped; .inx apart from folder-name case / old 120-byte layout |
+| Hand-made edited files (RLE / ID / grey TGAs, top-down / gapped / bitfield BMPs, waves with LIST / extensible / 18-byte fmt, UTF-16 .ini) → `--to-game`, read the way the game's loaders read | `scripts\check_to_game.py` | the game reads the right pixels and samples |
 | Plug-in install: 3ds Max (fresh user folder, update in place), Blender (`-c extension install-file`, scratch profile) | manual | installed and enabled |
 
 None of the game data is included; the tools read the game client's files.

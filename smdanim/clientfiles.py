@@ -66,7 +66,18 @@ def encode_wav(data):
     return data
 
 
+def _utf16(data):
+    """Text saved as UTF-16 (Notepad's "Unicode"), or None."""
+    if data[:2] == b'\xff\xfe':
+        return data[2:].decode('utf-16-le', 'replace')
+    if data[:2] == b'\xfe\xff':
+        return data[2:].decode('utf-16-be', 'replace')
+    return None
+
+
 def is_text(data):
+    if data[:2] in (b'\xff\xfe', b'\xfe\xff'):
+        return True
     return b'\0' not in data[:4096]
 
 
@@ -87,9 +98,12 @@ def text_to_utf8(data):
 
 
 def text_to_cp949(data):
-    """UTF-8 (with a BOM, or valid UTF-8 with Korean in it) -> CP949 text the game reads."""
+    """UTF-8 (with a BOM, or valid UTF-8 with Korean in it) or UTF-16 -> CP949 text the game reads."""
+    u16 = _utf16(data)
+    if u16 is not None:
+        return u16.encode(CP, 'replace')
     if data[:3] == b'\xef\xbb\xbf':
-        return data[3:].decode('utf-8').encode(CP, 'replace')
+        return data[3:].decode('utf-8', 'replace').encode(CP, 'replace')
     if max(data, default=0) < 0x80:
         return data
     try:
@@ -99,9 +113,12 @@ def text_to_cp949(data):
 
 
 def read_text(data):
-    """Text bytes as a str: UTF-8 when marked or valid, CP949 otherwise."""
+    """Text bytes as a str: UTF-16 or UTF-8 when marked, UTF-8 when valid, CP949 otherwise."""
+    u16 = _utf16(data)
+    if u16 is not None:
+        return u16
     if data[:3] == b'\xef\xbb\xbf':
-        return data[3:].decode('utf-8')
+        return data[3:].decode('utf-8', 'replace')
     try:
         return data.decode('utf-8')
     except UnicodeDecodeError:
@@ -304,7 +321,7 @@ def inx_to_ini(mi, rel_path=''):
     folder = getattr(mi, 'folder', '') or os.path.dirname(rel_path.replace('/', '\\'))
     if folder and not folder.endswith('\\'):
         folder += '\\'
-    out = ['// %s - rebuilt from the compiled .inx by PT SMD2ASE' % (os.path.basename(rel_path) or 'model'), '']
+    out = ['// %s - rebuilt from the compiled .inx by PristonTale - Rosetta Stone' % (os.path.basename(rel_path) or 'model'), '']
     if mi.model_file:
         out.append('*모양파일\t%s' % _rel_name(mi.model_file, folder))
     for word, names in zip(('*정밀모양', '*보통모양', '*저질모양'), mi.lod):

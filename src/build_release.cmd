@@ -14,7 +14,7 @@ rem  Optional:  build_release.cmd standalone
 rem    also publishes a self-contained .NET 8 build (~70 MB single exe).
 rem ---------------------------------------------------------------------------
 setlocal
-set VER=1.4.0
+set VER=1.4.1
 set ROOT=%~dp0..
 set OUT=%ROOT%\release\PT_RosettaStone_v%VER%
 

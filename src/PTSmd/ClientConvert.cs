@@ -3,7 +3,7 @@
 //
 //   <out>\...\*.ase            models and maps (.smd)                      (Converter)
 //   <out>\...\*.bmp / *.tga    textures with their header restored         (Textures)
-//   <out>\...\*.wav            sound effects playable again (JODO -> RIFF); music (.bgm) as .wav
+//   <out>\...\*.wav            sound effects playable again (JODO -> RIFF); music (.bgm) as Name.bgm.wav
 //   <out>\...\*.inf .ini ...   Korean text as UTF-8
 //   <out>\...\*.ini/.inf/.in   model info rebuilt from every compiled .inx (motion frames, key
 //                              events, LODs ...), as UTF-8
@@ -62,18 +62,7 @@ namespace PTSmd
         static bool IsTopFolder(string d) => Array.Exists(TopFolders, t => string.Equals(Path.GetFileName(d), t, StringComparison.OrdinalIgnoreCase));
 
         /// <summary>True when the folder looks like a game client (has at least two of char, field, image, wav ...).</summary>
-        public static bool LooksLikeClient(string dir)
-        {
-            if (!Directory.Exists(dir)) return false;
-            int n = 0;
-            try
-            {
-                foreach (var d in Directory.GetDirectories(dir))
-                    if (IsTopFolder(d)) n++;
-            }
-            catch (Exception) { return false; }
-            return n >= 2;
-        }
+        public static bool LooksLikeClient(string dir) => Directory.Exists(dir) && Converter.LooksLikeClient(Path.GetFullPath(dir).TrimEnd('\\', '/'));
 
         static List<string> AllFiles(string root)
         {
@@ -112,12 +101,16 @@ namespace PTSmd
             return null;
         }
 
-        /// <summary>The game folder a dropped file or folder belongs to (its paths below it are kept).</summary>
+        /// <summary>The game folder a dropped file or folder belongs to (its paths below it are kept):
+        /// the nearest folder that looks like a game folder (the game folder, or a decoded copy of
+        /// it; inside it are folders named like top ones - Effect\Sky\Field, image\Sinimage\Effect),
+        /// else the folder above the nearest char / Field / wav ... (a copy of single folders).</summary>
         public static string RootOf(string input)
         {
             string p = Path.GetFullPath(input).TrimEnd('\\', '/');
-            if (Directory.Exists(p) && LooksLikeClient(p)) return p;
             string start = Directory.Exists(p) ? p : Path.GetDirectoryName(p);
+            for (string d = start; d != null; d = Path.GetDirectoryName(d))
+                if (LooksLikeClient(d)) return d;
             for (string d = start; d != null; d = Path.GetDirectoryName(d))
                 if (IsTopFolder(d)) return Path.GetDirectoryName(d) ?? d;
             return start;
@@ -154,6 +147,7 @@ namespace PTSmd
 
         public static Scan ScanInputs(IEnumerable<string> inputs)
         {
+            Converter.ClearClientCache();                 // (folders may have changed since the last run)
             var sc = new Scan();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var input in inputs)
@@ -225,12 +219,13 @@ namespace PTSmd
                             break;
                         case FileKind.Texture:
                             if (!s.Textures) { res.Skipped++; continue; }
-                            if (!File.Exists(dst)) PTSmd.Textures.DecodeFile(f, dst);     // (a model may have written it already)
+                            PTSmd.Textures.DecodeIfNeeded(f, dst);                        // (a model may have written it already)
                             res.Textures++;
                             break;
                         case FileKind.Sound:
                             if (!s.Sounds) { res.Skipped++; continue; }
-                            Write(ext == ".bgm" ? Path.ChangeExtension(dst, ".wav") : dst, ClientFiles.DecodeWav(File.ReadAllBytes(f)));
+                            // music (.bgm, already a plain wave) as Name.bgm.wav: plays anywhere, and goes back as .bgm
+                            Write(ext == ".bgm" ? dst + ".wav" : dst, ClientFiles.DecodeWav(File.ReadAllBytes(f)));
                             res.Sounds++;
                             break;
                         case FileKind.ModelInfo:
@@ -343,43 +338,77 @@ namespace PTSmd
         // ------------------------------------------------------------------------- back to the game
         public class ToGameResult
         {
-            public int Inx, Sounds, Textures, Texts, Failed;
-            public string Summary() => string.Format("{0} .inx compiled, {1} sounds, {2} textures, {3} text files{4}",
-                Inx, Sounds, Textures, Texts, Failed > 0 ? ", " + Failed + " failed" : "");
+            public int Inx, Sounds, Textures, Texts, Failed, Notes;
+            public bool Cancelled;
+            public string Summary() => string.Format("{0} .inx compiled, {1} sounds, {2} textures, {3} text files{4}{5}",
+                Inx, Sounds, Textures, Texts, Notes > 0 ? ", " + Notes + " note(s)" : "", Failed > 0 ? ", " + Failed + " failed" : "");
+        }
+
+        /// <summary>What ToGame works on: the files given, and every file below the folders given -
+        /// except, inside a dropped folder, the decoder's own _server copy (its unedited model info
+        /// would overwrite the edited ones), a game_format folder (earlier output),
+        /// missing_textures.txt, and anything inside outDir.</summary>
+        public static List<string> ToGameFiles(IEnumerable<string> inputs, string outDir)
+        {
+            Converter.ClearClientCache();                 // (folders may have changed since the last run)
+            string od = Path.GetFullPath(outDir).TrimEnd('\\') + "\\";
+            var files = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p0 in inputs)
+            {
+                string p = Path.GetFullPath(p0).TrimEnd('\\');
+                if (File.Exists(p)) { if (seen.Add(p)) files.Add(p); continue; }
+                if (!Directory.Exists(p)) continue;
+                foreach (var f in AllFiles(p))
+                {
+                    string rel = f.Substring(p.Length + 1);
+                    if (rel.StartsWith(ServerFolder + "\\", StringComparison.OrdinalIgnoreCase) ||
+                        rel.StartsWith("game_format\\", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(rel, "missing_textures.txt", StringComparison.OrdinalIgnoreCase) ||
+                        f.StartsWith(od, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (seen.Add(f)) files.Add(f);
+                }
+            }
+            return files;
         }
 
         /// <summary>Edited files -> the forms the client ships: .ini/.inf/.in also as .inx (CP949 text
-        /// next to it), .wav with the client's sound header, .bmp/.tga with the client's texture
-        /// header, other UTF-8 text as CP949.  Files are written under outDir with the same layout
-        /// below the game folder (found from char\, field\ ... in the path).  layout: 172 (current
-        /// clients) or 120 (2012 clients).</summary>
-        public static ToGameResult ToGame(IEnumerable<string> inputs, string outDir, Action<string, bool> onLog, int layout = 172)
+        /// next to it), .wav with the client's sound header in the layout its loader reads (music,
+        /// decoded as Name.bgm.wav: Name.bgm, a plain wave), .bmp/.tga in a form the game's loaders read with the client's
+        /// texture header, other UTF-8 / UTF-16 text as CP949.  Files are written under outDir with
+        /// the same layout below the game folder (found from char\, field\ ... in the path).
+        /// layout: 172 (current clients) or 120 (2012 clients).  onLog gets "OK ..." lines and notes
+        /// (what was repaired, or what the game will not read as intended).</summary>
+        public static ToGameResult ToGame(IEnumerable<string> inputs, string outDir, Action<string, bool> onLog, int layout = 172,
+                                          Action<int, int, string> onProgress = null, CancellationToken cancel = default(CancellationToken))
         {
+            if (layout != 120 && layout != 172) throw new ArgumentException("the .inx layout is 172 (current clients) or 120 (2012 clients)");
             var r = new ToGameResult();
-            var files = new List<string>();
-            foreach (var p in inputs)
+            var files = ToGameFiles(inputs, outDir);
+            for (int i = 0; i < files.Count; i++)
             {
-                if (Directory.Exists(p)) files.AddRange(AllFiles(Path.GetFullPath(p)));
-                else if (File.Exists(p)) files.Add(Path.GetFullPath(p));
-            }
-            foreach (var f in files)
-            {
+                if (cancel.IsCancellationRequested) { r.Cancelled = true; onLog?.Invoke("Cancelled.", false); break; }
+                string f = files[i];
                 string ext = Path.GetExtension(f).ToLowerInvariant();
-                string root = Converter.GuessGameRoot(f);
+                string root = RootOf(f);                                  // (wav\, sky\ ... count too)
                 string rel = Rel(f, root);
                 string dst = Path.Combine(outDir, rel);
+                onProgress?.Invoke(i, files.Count, rel);
+                var notes = new List<string>();
                 try
                 {
-                    if (ext == ".wav")
+                    if (ext == ".wav" || ext == ".bgm")
                     {
-                        Write(dst, ClientFiles.EncodeWav(File.ReadAllBytes(f)));
+                        byte[] d = File.ReadAllBytes(f);
+                        if (ext == ".bgm") Write(dst, ClientFiles.DecodeWav(d));                       // music: a plain wave
+                        else if (f.EndsWith(".bgm.wav", StringComparison.OrdinalIgnoreCase))
+                            Write(dst.Substring(0, dst.Length - 4), ClientFiles.DecodeWav(d));             // Name.bgm.wav -> Name.bgm
+                        else Write(dst, ClientFiles.WavForGame(d, "JODO", notes));
                         r.Sounds++;
                     }
                     else if (ext == ".bmp" || ext == ".tga")
                     {
-                        byte[] d = File.ReadAllBytes(f);
-                        PTSmd.Textures.Encode(d);
-                        Write(dst, d);
+                        Write(dst, PTSmd.Textures.ForGame(File.ReadAllBytes(f), notes));
                         r.Textures++;
                     }
                     else if (IsTextExt(ext))
@@ -387,19 +416,29 @@ namespace PTSmd
                         byte[] raw = File.ReadAllBytes(f);
                         if (!ClientFiles.IsText(raw)) continue;
                         if (f.EndsWith(".shipped" + ext, StringComparison.OrdinalIgnoreCase)) continue;
+                        string text = ClientFiles.ReadText(raw);
                         byte[] cp = ClientFiles.TextToCp949(raw);
+                        if (!ReferenceEquals(cp, raw))
+                        {
+                            var lost = ClientFiles.Unmappable(text);
+                            if (lost.Count > 0)
+                                notes.Add("the game's Korean code page has no " + string.Join(" ", lost.Take(10).Select(c => "'" + c + "'")) +
+                                          (lost.Count > 10 ? " ..." : "") + " - written as '?'");
+                        }
                         Write(dst, cp);
                         r.Texts++;
                         if (Array.IndexOf(ModelInfoExtensions, ext) >= 0 && IsModelInfo(raw))
                         {
                             string relInx = Path.ChangeExtension(rel, ".inx");
-                            if (Converter.RelPath(f, root) == null)
-                                onLog?.Invoke("note " + Path.GetFileName(f) + ": not inside a game folder (char\\...), the .inx path checksum uses the bare file name", false);
-                            Write(Path.Combine(outDir, relInx), ClientFiles.CompileIni(ClientFiles.ReadText(raw), relInx, layout));
+                            if (rel.IndexOf('\\') < 0)
+                                notes.Add("not inside the game's folders (char\\monster\\...): the .inx path checksum is made from the bare file " +
+                                          "name, so the game will not read its motions right - keep the folders when you edit");
+                            Write(Path.Combine(outDir, relInx), ClientFiles.CompileIni(text, relInx, layout, null, null, notes.Add));
                             r.Inx++;
                             onLog?.Invoke("OK   " + relInx, true);
                         }
                     }
+                    foreach (var n in notes) { r.Notes++; onLog?.Invoke("note " + rel + ": " + n, false); }
                 }
                 catch (Exception e)
                 {
@@ -407,6 +446,7 @@ namespace PTSmd
                     onLog?.Invoke("ERR  " + rel + ": " + e.Message, false);
                 }
             }
+            onProgress?.Invoke(files.Count, files.Count, "");
             return r;
         }
 

@@ -84,6 +84,7 @@ namespace PTSmd
             var res = new BatchResult();
             var sw = Stopwatch.StartNew();
             Textures.ClearCache();
+            Converter.ClearClientCache();
             for (int i = 0; i < files.Count; i++)
             {
                 if (cancel.IsCancellationRequested) { res.Cancelled = true; onLog?.Invoke("Cancelled.", false); break; }

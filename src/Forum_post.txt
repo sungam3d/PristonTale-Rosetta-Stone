@@ -1,72 +1,105 @@
-PristonTale - Rosetta Stone v1.4 (was: PT SMD -> ASE Converter) - decode and encode Priston Tale game files, edit models in 3ds Max and Blender
-==================================================================================================
+[CENTER][SIZE=6][B]PristonTale - Rosetta Stone[/B][/SIZE]
+[SIZE=4]Decode Priston Tale's game files into formats you can open and edit - then encode your work back for the game.[/SIZE]
 
-New in v1.4
------------
-- Drop the whole game folder in: models -> .ase, textures, playable sounds (the game
-  scrambles the .wav header), Korean text as UTF-8, and every compiled .inx (monster, NPC
-  and player model info) rebuilt as the .ini / .inf / .in it was made from - frames and
-  key events of every animation. _server\ gets the model info in the game's own code page.
-- Two drop boxes: DECODE (game -> readable) and ENCODE (edited files -> game format):
-  edited .ini/.inf/.in -> .inx (byte-identical to the game's own
-  on all 2455 .inx of a current client), .wav / .bmp / .tga -> the game's headers.
-- The window finds 3ds Max and Blender on your PC and installs or updates the plug-ins
-  with one click.
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/docs/images/window.png[/IMG]
 
-What it is
-----------
-A free tool that turns Priston Tale's game files (.smd / .smb) back into .ase files,
-the 3ds Max format the game was originally made with. Plug-ins for 3ds Max and Blender
-import them with textures, skeletons and animation, and export your edits back to .ase
-in the same layout as the developers' own files, so the game can rebuild its .smd/.smb.
+[SIZE=5][B][URL=https://github.com/sungam3d/PristonTale-Rosetta-Stone/releases/latest]>> Download v1.4.1 <<[/URL][/B][/SIZE]
+Windows 10/11, nothing to install - free and open source (MIT)
+[I](formerly "PT SMD -> ASE Converter")[/I][/CENTER]
 
-What you can open and export
-----------------------------
-- Maps: every zone, in its real world position, so several maps line up exactly as in
-  the game. Includes the game's lighting, lightmaps and the objects placed on the map.
-  New in v1.3: maps are split back into separate objects (terrain, buildings, trees...)
-  like the original .ase files, so you can select and edit one thing at a time.
-- Weapons and items: swords, axes, staffs, armour, shields and other drop items.
-- Monsters: skinned to their skeleton, with every animation (walk, run, attack, die...).
-  Export writes the mesh, bones, skin and animation.
-- Characters: player armour, heads and costumes on their class skeleton, with the whole
-  class animation and a clickable list of motions. Export writes the mesh, bones and
-  skin (the game takes the animation from the class file).
-- The developers' original character .ASE files can be animated too.
+[SIZE=5][B]What it does[/B][/SIZE]
+[LIST]
+[*][B]Models and maps[/B]: .smd / .smb -> .ase, the 3ds Max format the game was made with. Maps in their real world position, split into objects; weapons and items; monsters skinned and animated; player armour, heads and costumes on their class skeleton with every class motion.
+[*][B]Textures[/B]: the game scrambles the header of every .bmp / .tga. They come out as normal images - even the few the developers scrambled twice.
+[*][B]Sounds[/B]: the game's .wav files start with "JODO" instead of "RIFF". They come out playable, music (.bgm) too.
+[*][B]Korean text[/B]: .ini .inf .in .sin .msg .txt .lua ... (code page 949) come out as UTF-8, readable in any editor.
+[*][B]Model info[/B]: every compiled .inx (monsters, NPCs, player models) is rebuilt as the .ini / .inf / .in it was made from - model files, detail levels, every animation's frames and key events.
+[*][B]3ds Max and Blender plug-ins[/B]: import with textures, skeletons and animation, export back to .ase in the developers' own layout so the game rebuilds its .smd / .smb. Installed with one click.
+[*][B]Back to the game[/B]: edited model info, textures, sounds and text go back into the exact forms the game reads. The .inx compiler matches the game byte for byte on all 2455 .inx of a current client.
+[/LIST]
 
-Everything is checked against the game's own maths: models move the same as in game, and
-import -> export gives back the same bones, skin and animation.
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/src/Guide/Guide_images/max_map.png[/IMG]
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/src/Guide/Guide_images/blender_character.png[/IMG]
 
-What's in the download
-----------------------
-- PT_RosettaStone.exe   - drag and drop converter (Windows 10/11, nothing to install)
-- 3dsMax\          - import/export plug-in for 3ds Max 2020 or newer
-- Blender\         - import/export add-on for Blender 4.2 or newer
-- Guide_3dsMax.html / Guide_Blender.html - illustrated step-by-step guides
-- smd2ase.exe      - command line version
-- Source\          - all source code
+[SIZE=5][B]Getting started[/B][/SIZE]
+[LIST=1]
+[*]Download the release, unzip it anywhere and start [B]PT_RosettaStone.exe[/B]. ("Windows protected your PC"? More info -> Run anyway - the program isn't signed.)
+[*]Click [B]Install[/B] next to 3ds Max or Blender in the window.
+[*]Drop your Priston Tale folder - or any folder or file from it - on the blue [B]DECODE[/B] box.
+[*]Open the .ase files in 3ds Max or Blender, everything else in any image, sound or text editor.
+[*]Edit, export, and drop your edited files on the orange [B]ENCODE[/B] box.
+[/LIST]
+[B]Back up your game folder first[/B], and try one file at a time in the game. The download has an illustrated step-by-step guide for each program (Guide_3dsMax.html, Guide_Blender.html).
 
-Quick start
------------
-1. Run PT_RosettaStone.exe and drag a .smd file or a folder from your Priston Tale folder
-   onto it (Field for maps, char\monster for monsters, char\tmABCD for characters,
-   image\Sinimage\Items\DropItem for weapons).
-2. Install the plug-in for your program: click Install next to 3ds Max or Blender in
-   the converter window (or see the guide).
-3. Import the .ase files. Characters and monsters come in animated - pick a motion
-   from the PT Motions list (3ds Max) or the PT tab (Blender) and press play.
-4. Edit, then export with the original file name.
+[SIZE=5][B]DECODE: game files -> readable[/B][/SIZE]
+There is nothing to choose: drop the whole game folder and every kind of file is converted, in the game's own folder layout. Drop a map or monster folder and its models are converted with their textures. Folders first show what's in them and how long they will take.
 
-Putting edits back into the game
---------------------------------
-Export with the original name, put the .ase and its textures in the game folder, remove
-the old .smd (and a monster's own .smb), and the game rebuilds them on start. The guides
-list exactly which files to remove for each kind of model. Back up first and try one
-file at a time - the game's own rebuild step can only be tested in the game.
-Not yet supported: replacing the animation of the monsters that keep it in a separate
-motion file (their mesh and skin can be changed).
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/docs/images/textures.png[/IMG]
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/docs/images/model_info.png[/IMG]
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/docs/images/sounds.png[/IMG]
 
-Download: https://github.com/sungam3d/Pristontale-SMD-to-ASE-Converter/releases/latest
-Source code (MIT licence): https://github.com/sungam3d/Pristontale-SMD-to-ASE-Converter
+[CODE]PT-Readable\
+  char\monster\Tees\Tees.ase     the model, skinned and animated
+  char\monster\Tees\Tees.tga     its texture, readable
+  char\monster\Tees\Tees.ini     its model info, rebuilt from Tees.inx
+  Field\forest\fore-1.ase        a map, split into its objects
+  wav\Effects\...\damage 1.wav   a sound effect, playable
+  wav\BGM\...\Name.bgm.wav       music (goes back as Name.bgm)
+  _server\char\...\Tees.ini      the model info in the game's Korean code page, for the server[/CODE]
+
+[SIZE=5][B]Models in 3ds Max and Blender[/B][/SIZE]
+[LIST]
+[*][B]Maps[/B]: every zone in its real world position, so maps line up as in the game. Split into objects (terrain, buildings, trees...) with their own pivots. Game lighting, lightmaps and collision walls included.
+[*][B]Weapons and items[/B]: swords, axes, staffs, armour, shields, drop items.
+[*][B]Monsters[/B]: skinned, with every animation (stand, walk, run, attack, die...). Export writes mesh, bones, skin and animation.
+[*][B]Characters[/B]: armour, heads and costumes on their class skeleton with the whole class animation and a clickable motion list. Export writes mesh, bones and skin (the game takes the animation from the class file).
+[*][B]The developers' own .ASE files[/B]: animated with the class animation, or in their bind pose.
+[/LIST]
+Everything is checked against the game's own maths: models move as in the game, and import -> export gives back the same bones, skin and animation.
+
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/src/Guide/Guide_images/max_character.png[/IMG]
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/src/Guide/Guide_images/max_motions.png[/IMG]
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/src/Guide/Guide_images/blender_map.png[/IMG]
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/src/Guide/Guide_images/max_weapon.png[/IMG]
+
+[SIZE=5][B]Plug-ins: one-click install[/B][/SIZE]
+The window finds every 3ds Max (2020+) and Blender (4.2+) on your PC and shows Install / Update for each. 3ds Max: the plug-in goes into your own scripts folder (no admin rights), then Customize -> Customize User Interface -> Toolbars -> "PT Tools". Blender installs and switches on the add-on itself (close Blender first).
+
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/docs/images/plugins_panel.png[/IMG]
+
+Import: [B]PT ASE Import[/B] in 3ds Max, [B]File -> Import -> Priston Tale / 3ds Max ASE[/B] in Blender. Characters and monsters come in animated: pick a motion from the PT Motions list (3ds Max) or the PT tab (N panel, Blender) and press play. Export with the same name as the original .smd.
+
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/src/Guide/Guide_images/max_dialog.png[/IMG]
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/src/Guide/Guide_images/blender_import_options.png[/IMG]
+
+[SIZE=5][B]ENCODE: your edits -> game files[/B][/SIZE]
+Drop your edited files, or the whole output folder, on the ENCODE box. Model info is compiled to .inx exactly as the game does it, textures and sounds get the game's headers, text goes back to the Korean code page - all in game_format in your output folder.
+
+The game's loaders are much stricter than editors, so Encode also puts files into the layout the game reads: RLE TGAs (GIMP's default) unpacked, TGA image IDs left out, upside-down BMPs flipped, wave files with extra chunks rewritten. [B]Notes in the log[/B] tell you what the game would not read the way you meant: an unknown weapon / class / skill name, a // comment after a motion's frames, a character the Korean code page doesn't have, a float sound...
+
+[IMG]https://raw.githubusercontent.com/sungam3d/PristonTale-Rosetta-Stone/main/docs/images/encode_notes.png[/IMG]
+
+[SIZE=5][B]Putting your work back into the game[/B][/SIZE]
+When the game finds an .ase without its .smd, it builds the .smd (and .smb) itself on start:
+[LIST=1]
+[*]Back up the originals.
+[*]Export with the same name as the original .smd (Tees.ase for Tees.smd).
+[*]Copy the .ase and its textures into the original's game folder.
+[*]Remove the old .smd (a monster with its animation inside: also its .smb; keep the .inx and the class m1-m8.smb files).
+[*]Copy edited model info, textures and sounds from game_format over the game's files.
+[/LIST]
+For maps, convert with "Baked vertex lighting" unticked or the game lights them twice. Not supported yet: replacing the animation of monsters that keep it in a separate motion file (their mesh and skin can be changed).
+
+[SIZE=5][B]Command line[/B][/SIZE]
+[CODE]smd2ase "<game>\Field" -o D:\PT-ASE --textures         models and maps -> .ase
+smd2ase --client "<game>" -o D:\PT-Readable            the whole game folder (like DECODE)
+smd2ase --to-game D:\PT-Readable\char\monster\Tees -o D:\PT-Game   edited files -> game (like ENCODE)
+smd2ase --help                                         every option[/CODE]
+
+[SIZE=5][B]Credits[/B][/SIZE]
+Big thanks to [B]bobsobol[/B] for [URL=https://forum.ragezone.com/threads/pt-file-patcher.684994/]PT File Patcher[/URL] (and TGAPatch before it) - the tool that first made Priston Tale's .tga, .bmp, .wav and .bgm files open in normal editors, shared with its source right here on RaGEZONE. Rosetta Stone's texture and sound decoding stands on that work, and on Obscura's BMPPatcher and WAVPatcher that it built on. And thanks to the PT community here for years of shared research.
+
+[B]Download:[/B] [URL]https://github.com/sungam3d/PristonTale-Rosetta-Stone/releases/latest[/URL]
+[B]Source code[/B] (MIT; the Blender add-on GPL-3.0): [URL]https://github.com/sungam3d/PristonTale-Rosetta-Stone[/URL]
 
 Feedback and bug reports welcome - please say which file you converted and what you saw.

@@ -165,10 +165,39 @@ class Options(object):
 GAME_TOP_FOLDERS = ('field', 'char', 'image', 'effect')
 
 
+CLIENT_TOP_FOLDERS = ('char', 'field', 'image', 'effect', 'wav', 'sky', 'rain', 'weapons', 'cselect', 'startimage')
+_client_cache = {}
+
+
+def looks_like_client(d):
+    """True when d holds at least two of char, Field, image, Effect, wav ... (cached)."""
+    key = d.lower()
+    if key not in _client_cache:
+        n = 0
+        try:
+            for e in os.listdir(d):
+                if e.lower() in CLIENT_TOP_FOLDERS and os.path.isdir(os.path.join(d, e)):
+                    n += 1
+        except OSError:
+            pass
+        _client_cache[key] = n >= 2
+    return _client_cache[key]
+
+
 def guess_game_root(path):
-    """Walk up from an SMD path to the folder containing 'Field' (or 'char', 'image', 'effect':
-    a char folder converted on its own keeps char\\monster\\<name>\\ instead of writing every
-    model next to each other, where same-named ones overwrote each other)."""
+    """The game folder an SMD belongs to: the nearest folder above it that looks like a game
+    folder (some game folders hold folders named like top ones: Effect\\Sky\\Field,
+    image\\Sinimage\\Effect), else the folder containing the nearest 'Field' (or 'char', 'image',
+    'effect': a char folder converted on its own keeps char\\monster\\<name>\\ instead of writing
+    every model next to each other, where same-named ones overwrote each other)."""
+    a = os.path.dirname(os.path.abspath(path))
+    while True:
+        if looks_like_client(a):
+            return a
+        parent = os.path.dirname(a)
+        if parent == a:
+            break
+        a = parent
     d = os.path.dirname(os.path.abspath(path))
     while True:
         parent = os.path.dirname(d)
@@ -850,6 +879,15 @@ def find_texture(rel, smd_path, root=None):
     return None, None
 
 
+def _rel_under(path, root):
+    """path below root (case-insensitive), or None (as Converter.RelPath)."""
+    p = os.path.abspath(path)
+    r = os.path.abspath(root).rstrip('\\/')
+    if p.lower().startswith(r.lower() + os.sep):
+        return p[len(r) + 1:]
+    return None
+
+
 def resolve_textures(sc, opt, smd_path):
     root = opt.game_root or guess_game_root(smd_path)
     names = set()
@@ -869,8 +907,14 @@ def resolve_textures(sc, opt, smd_path):
             if src and opt.texture_out and not os.path.isfile(out):
                 decode_texture_file(src, out)
         elif opt.texture_out:
-            relpath = os.path.relpath(src, used_root) if (src and used_root) else \
-                (os.path.basename(src) if src else rel)
+            if src and used_root:
+                relpath = os.path.relpath(src, used_root)
+            elif src:
+                # (a texture found next to the model keeps its place below the game folder too:
+                # same-named ones of other folders - sky day / evening / night ... - differ)
+                relpath = _rel_under(src, root) or os.path.basename(src)
+            else:
+                relpath = rel
             out = os.path.join(opt.texture_out, relpath)
             if src and not os.path.isfile(out):
                 decode_texture_file(src, out)

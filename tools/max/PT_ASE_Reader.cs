@@ -1502,6 +1502,19 @@ namespace PTAse
                     if (File.Exists(q)) return Readable(q);
                 }
             }
+            // a converter output folder that was moved or shared keeps its layout, but the .ase still
+            // names the old place: the end of the old path below one of the .ase's folders
+            string[] parts = path.Replace('/', '\\').Split(new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
+            string up = Path.GetDirectoryName(FileName);
+            for (int lvl = 0; lvl < 8 && !string.IsNullOrEmpty(up); lvl++)
+            {
+                for (int k = Math.Min(parts.Length - 1, 8); k >= 2; k--)          // (parts[0]: the old drive)
+                {
+                    string c = Path.Combine(up, string.Join("\\", parts, parts.Length - k, k));
+                    if (File.Exists(c)) return Readable(c);
+                }
+                up = Path.GetDirectoryName(up);
+            }
             // the converter's "textures" folder next to the .ase (any depth), by file name
             if (texIndex == null)
             {
@@ -1522,6 +1535,17 @@ namespace PTAse
         }
         Dictionary<string, string> texIndex;
 
+        // A TGA header a reader can use (as PTSmd.Textures.TgaHeaderOk).
+        static bool TgaHeaderOk(byte[] h, int off, long fileLen)
+        {
+            int idLen = h[off], cmap = h[off + 1], type = h[off + 2];
+            int w = h[off + 12] | h[off + 13] << 8, ht = h[off + 14] | h[off + 15] << 8, bpp = h[off + 16];
+            if (cmap > 1 || !(type == 1 || type == 2 || type == 3 || type == 9 || type == 10 || type == 11)) return false;
+            if (w == 0 || ht == 0 || !(bpp == 8 || bpp == 15 || bpp == 16 || bpp == 24 || bpp == 32)) return false;
+            if ((type == 2 || type == 3) && 18L + idLen + (long)w * ht * ((bpp + 7) / 8) > fileLen) return false;
+            return true;
+        }
+
         // Game client textures are scrambled ('A8' BMP / 'G8' TGA header); 3ds Max can't read
         // them, so a decoded copy goes to %TEMP%\pt_texture_cache.
         static string Readable(string path)
@@ -1534,14 +1558,40 @@ namespace PTAse
                 if (!bmp && !tga) return path;
                 string dir = Path.Combine(Path.GetTempPath(), "pt_texture_cache");
                 Directory.CreateDirectory(dir);
-                string outp = Path.Combine(dir, ((uint)Path.GetFullPath(path).ToLowerInvariant().GetHashCode()).ToString("x8")
-                                                + "_" + Path.GetFileName(path));
+                // named after the file's path, size and date: an edited texture gets a fresh copy
+                FileInfo fi = new FileInfo(path);
+                string key = Path.GetFullPath(path).ToLowerInvariant() + "|" + fi.Length + "|" + fi.LastWriteTimeUtc.Ticks;
+                string outp = Path.Combine(dir, ((uint)key.GetHashCode()).ToString("x8") + "_" + Path.GetFileName(path));
                 // the game's own file, for the exporter (TexInfo.Original)
                 if (!File.Exists(outp + ".src")) File.WriteAllText(outp + ".src", Path.GetFullPath(path));
                 if (File.Exists(outp)) return outp;
                 byte[] d = File.ReadAllBytes(path);
-                if (bmp) { d[0] = (byte)'B'; d[1] = (byte)'M'; for (int i = 2; i < 14 && i < d.Length; i++) d[i] = (byte)(d[i] - i * i); }
-                else { d[0] = 0; d[1] = 0; for (int i = 2; i < 18 && i < d.Length; i++) d[i] = (byte)(d[i] - i * i); }
+                if (bmp && d.Length >= 14)
+                {
+                    d[0] = (byte)'B'; d[1] = (byte)'M';
+                    for (int i = 2; i < 14; i++) d[i] = (byte)(d[i] - i * i);
+                    // scrambled twice (StartImage\...\Mokoba.BMP): undo once more when the pixel offset is past the end
+                    uint pix = BitConverter.ToUInt32(d, 10);
+                    if (pix < 26 || pix >= d.Length)
+                    {
+                        byte[] twice = new byte[14];
+                        for (int i = 2; i < 14; i++) twice[i] = (byte)(d[i] - i * i);
+                        uint pix2 = BitConverter.ToUInt32(twice, 10);
+                        if (pix2 >= 26 && pix2 < d.Length && BitConverter.ToUInt32(twice, 2) == d.Length) Buffer.BlockCopy(twice, 2, d, 2, 12);
+                    }
+                }
+                else if (d.Length >= 18)
+                {
+                    d[0] = 0; d[1] = 0;
+                    for (int i = 2; i < 18; i++) d[i] = (byte)(d[i] - i * i);
+                    // some client TGAs were scrambled twice (Field\castle, Fall_Game, Iron)
+                    if (!TgaHeaderOk(d, 0, d.Length))
+                    {
+                        byte[] twice = new byte[18];
+                        for (int i = 2; i < 18; i++) twice[i] = (byte)(d[i] - i * i);
+                        if (TgaHeaderOk(twice, 0, d.Length)) Buffer.BlockCopy(twice, 2, d, 2, 16);
+                    }
+                }
                 File.WriteAllBytes(outp, d);
                 return outp;
             }

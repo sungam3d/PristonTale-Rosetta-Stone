@@ -47,7 +47,7 @@ for f in files:
     rel = os.path.relpath(f, root)
     ext = os.path.splitext(f)[1].lower()
     if ext in ('.wav', '.bgm'):
-        expect[os.path.splitext(rel)[0] + '.wav' if ext == '.bgm' else rel] = cf.decode_wav(open(f, 'rb').read())
+        expect[rel + '.wav' if ext == '.bgm' else rel] = cf.decode_wav(open(f, 'rb').read())     # (music: Name.bgm.wav)
     elif ext == '.inx':
         b = open(f, 'rb').read()
         mi = cf.read_inx(b)

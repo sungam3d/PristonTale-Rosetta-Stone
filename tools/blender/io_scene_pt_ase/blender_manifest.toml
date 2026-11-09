@@ -1,14 +1,14 @@
 schema_version = "1.0.0"
 
 id = "pt_ase_smd_importer"
-version = "1.4.2"
+version = "1.4.3"
 name = "Priston Tale ASE Import/Export"
 tagline = "Priston Tale maps, characters and monsters as 3ds Max ASE"
 maintainer = "sungam3d"
 type = "add-on"
 blender_version_min = "4.2.0"
 license = ["SPDX:GPL-3.0-or-later"]
-website = "https://github.com/sungam3d/Pristontale-SMD-to-ASE-Converter"
+website = "https://github.com/sungam3d/PristonTale-Rosetta-Stone"
 tags = ["Import-Export"]
 
 [permissions]

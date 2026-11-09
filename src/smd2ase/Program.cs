@@ -33,8 +33,8 @@ usage: smd2ase <file.smd | file.smb | folder> [...] [options]
 
 whole client:
   --client                convert everything in the game folder(s) given, keeping the folder
-                          layout: models -> .ase, textures, sounds (.wav playable again, .bgm
-                          -> .wav), Korean text -> UTF-8, compiled model info (.inx) -> the
+                          layout: models -> .ase, textures, sounds (.wav playable again, music
+                          X.bgm -> X.bgm.wav), Korean text -> UTF-8, compiled model info (.inx) -> the
                           .ini / .inf / .in it was built from; plus <out>\_server\ with the
                           model info in the game's own code page (CP949)
   --no-models / --no-textures / --no-sounds / --no-text / --no-modelinfo / --no-server-copy
@@ -43,8 +43,11 @@ whole client:
 
 back to the game:
   --to-game               the files / folders given -> the forms the client ships:
-                          .ini/.inf/.in -> .inx (+ CP949 text), .wav -> client sound header,
-                          .bmp/.tga -> client texture header, UTF-8 text -> CP949
+                          .ini/.inf/.in -> .inx (+ CP949 text), .wav -> client sound header in
+                          the layout the game reads (X.bgm.wav -> X.bgm), .bmp/.tga -> client
+                          texture header (RLE TGAs unpacked, BMP layout fixed), UTF-8 / UTF-16
+                          text -> CP949.  Inside a folder given, _server\ and game_format\ are
+                          left out; notes say what the game will not read as meant
   --inx-layout 120        write .inx for 2012 clients (default 172: later clients)
   --encode-textures DIR   scramble every plain .bmp/.tga under DIR in place
 
@@ -58,6 +61,7 @@ examples:
 
         static int Main(string[] args)
         {
+            try { Console.OutputEncoding = new System.Text.UTF8Encoding(false); } catch (Exception) { }   // (Korean names in notes)
             var inputs = new List<string>();
             var s = new BatchSettings();
             var t = s.Template;
@@ -83,7 +87,10 @@ examples:
                         case "--no-modelinfo": cs.ModelInfo = false; break;
                         case "--no-server-copy": cs.ServerCopy = false; break;
                         case "--copy-other": cs.CopyOther = true; break;
-                        case "--inx-layout": layout = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
+                        case "--inx-layout":
+                            layout = int.Parse(args[++i], CultureInfo.InvariantCulture);
+                            if (layout != 120 && layout != 172) { Console.Error.WriteLine("--inx-layout is 172 (current clients) or 120 (2012 clients)"); return 1; }
+                            break;
                         case "--check-inx": return CheckInx(args[++i]);
                         case "--game-root": s.GameRoot = args[++i]; break;
                         case "--textures": s.Textures = true; break;
@@ -102,7 +109,7 @@ examples:
                         case "--no-lights": t.IncludeLights = false; break;
                         case "--encode-textures":
                         {
-                            var r0 = Textures.EncodeFolder(args[++i]);
+                            var r0 = Textures.EncodeFolder(args[++i], Console.WriteLine);
                             Console.WriteLine("encoded {0} texture(s), {1} skipped (already encoded / not BMP or TGA)", r0.encoded, r0.skipped);
                             return 0;
                         }

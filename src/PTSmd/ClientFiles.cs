@@ -122,14 +122,104 @@ namespace PTSmd
             return o;
         }
 
+        /// <summary>An edited .wav in the layout the game's loader reads (Dxwav.cpp
+        /// CreateBufferFromWaveFile).  It does not walk the RIFF chunks: it wants the 16-byte "fmt "
+        /// chunk at byte 12 and then "data" (or one 4-byte "fact" chunk, then "data"; or an 18-byte
+        /// "fmt " with cbSize 0, "fact", "data").  Other files - LIST / bext / JUNK chunks from sound
+        /// editors, WAVE_FORMAT_EXTENSIBLE - are rewritten to fmt + data; PCM inside
+        /// WAVE_FORMAT_EXTENSIBLE becomes plain PCM.  magic: "JODO" (the client's sound effects).
+        /// notes gets what was changed, or why the game will not play the sound right.</summary>
+        public static byte[] WavForGame(byte[] data, string magic, List<string> notes)
+        {
+            if (data.Length < 20 || !(Starts(data, "RIFF") || Starts(data, "JODO")) || Encoding.ASCII.GetString(data, 8, 4) != "WAVE")
+            {
+                notes.Add("not a .wav file the game can play");
+                return data;
+            }
+            int fmtAt = -1, fmtLen = 0, dataAt = -1, dataLen = 0;
+            var ids = new List<string>();
+            long p = 12;
+            while (p + 8 <= data.Length && dataAt < 0)
+            {
+                string id = Encoding.ASCII.GetString(data, (int)p, 4);
+                long len = U32(data, (int)p + 4), avail = data.Length - p - 8;
+                ids.Add(id);
+                if (id == "fmt " && fmtAt < 0) { fmtAt = (int)p + 8; fmtLen = (int)Math.Min(len, avail); }
+                else if (id == "data")
+                {
+                    dataAt = (int)p + 8;
+                    dataLen = (int)Math.Min(len, avail);
+                    if (len > avail) notes.Add("the sound data is cut short");
+                }
+                p += 8 + len + (len & 1);
+            }
+            if (fmtAt < 0 || fmtLen < 16 || dataAt < 0) { notes.Add("damaged .wav (no fmt or data chunk)"); return data; }
+            int tag = data[fmtAt] | data[fmtAt + 1] << 8, bits = data[fmtAt + 14] | data[fmtAt + 15] << 8;
+            bool extensible = tag == 0xFFFE && fmtLen >= 40;
+            if (extensible) tag = data[fmtAt + 24] | data[fmtAt + 25] << 8;          // the sub-format
+            if (tag != 1)
+                notes.Add((tag == 3 ? "32-bit float sound" : "not PCM sound (format " + tag + ")") +
+                          ": the game plays it as noise - export it as 16-bit PCM");
+            else if (bits != 8 && bits != 16)
+                notes.Add(bits + "-bit sound: the game plays 8 and 16-bit sound - export it as 16-bit PCM");
+            bool asIs = fmtAt == 20 && !extensible &&
+                        ((fmtLen == 16 && ids.Count == 2) ||                                                    // fmt, data
+                         (fmtLen == 16 && ids.Count == 3 && ids[1] == "fact" && U32(data, 40) == 4) ||        // fmt, fact, data
+                         (fmtLen == 18 && data[36] == 0 && data[37] == 0 && ids.Count == 3 && ids[1] == "fact" && U32(data, 42) == 4));
+            byte[] o;
+            if (asIs) o = (byte[])data.Clone();
+            else
+            {
+                int pad = dataLen & 1;
+                o = new byte[44 + dataLen + pad];
+                Buffer.BlockCopy(data, fmtAt, o, 20, 16);
+                if (extensible) { o[20] = (byte)tag; o[21] = (byte)(tag >> 8); }
+                Put(o, 4, 36 + dataLen + pad);
+                o[8] = (byte)'W'; o[9] = (byte)'A'; o[10] = (byte)'V'; o[11] = (byte)'E';
+                o[12] = (byte)'f'; o[13] = (byte)'m'; o[14] = (byte)'t'; o[15] = (byte)' ';
+                Put(o, 16, 16);
+                o[36] = (byte)'d'; o[37] = (byte)'a'; o[38] = (byte)'t'; o[39] = (byte)'a';
+                Put(o, 40, dataLen);
+                Buffer.BlockCopy(data, dataAt, o, 44, dataLen);
+                notes.Add("sound header rewritten to the plain layout the game reads (" +
+                          string.Join(", ", ids.Where(i => i != "data").Select(i => i.Trim())) + " -> fmt, data)");
+            }
+            for (int i = 0; i < 4; i++) o[i] = (byte)magic[i];
+            return o;
+        }
+
         public static bool IsText(byte[] data)
         {
+            if (Utf16Bom(data)) return true;
             int n = Math.Min(data.Length, 4096);
             for (int i = 0; i < n; i++) if (data[i] == 0) return false;
             return true;
         }
 
         static bool HasBom(byte[] d) => d.Length >= 3 && d[0] == 0xEF && d[1] == 0xBB && d[2] == 0xBF;
+        static bool Utf16Bom(byte[] d) => d.Length >= 2 && ((d[0] == 0xFF && d[1] == 0xFE) || (d[0] == 0xFE && d[1] == 0xFF));
+
+        /// <summary>Text saved as UTF-16 (Notepad's "Unicode"), or null.</summary>
+        static string Utf16(byte[] d)
+        {
+            if (!Utf16Bom(d)) return null;
+            return d[0] == 0xFF ? Encoding.Unicode.GetString(d, 2, d.Length - 2) : Encoding.BigEndianUnicode.GetString(d, 2, d.Length - 2);
+        }
+
+        /// <summary>The characters of s the game's code page (949) has no place for: they would be
+        /// written as '?'.</summary>
+        public static List<string> Unmappable(string s)
+        {
+            var bad = new List<string>();
+            if (CP.GetString(CP.GetBytes(s)) == s) return bad;
+            for (int i = 0; i < s.Length; i++)
+            {
+                string ch = char.IsSurrogatePair(s, i) ? s.Substring(i++, 2) : s[i].ToString();
+                try { StrictCP.GetBytes(ch); }
+                catch (ArgumentException) { if (!bad.Contains(ch)) bad.Add(ch); }
+            }
+            return bad;
+        }
 
         /// <summary>CP949 text -> UTF-8 with a BOM (so Notepad and editors pick the right code page).
         /// Plain ASCII, text that already is UTF-8 and bytes that are not clean CP949 stay as they are.</summary>
@@ -149,6 +239,8 @@ namespace PTSmd
         /// <summary>UTF-8 (with a BOM, or valid UTF-8 with Korean in it) -> CP949 text the game reads.</summary>
         public static byte[] TextToCp949(byte[] data)
         {
+            var u16 = Utf16(data);
+            if (u16 != null) return CP.GetBytes(u16);
             if (HasBom(data)) return CP.GetBytes(Encoding.UTF8.GetString(data, 3, data.Length - 3));
             if (data.All(b => b < 0x80)) return data;
             try { return CP.GetBytes(StrictUtf8.GetString(data)); } catch (ArgumentException) { return data; }
@@ -157,6 +249,8 @@ namespace PTSmd
         /// <summary>Text bytes as a string: UTF-8 when marked or valid, CP949 otherwise.</summary>
         public static string ReadText(byte[] data)
         {
+            var u16 = Utf16(data);
+            if (u16 != null) return u16;
             if (HasBom(data)) return Encoding.UTF8.GetString(data, 3, data.Length - 3);
             try { return StrictUtf8.GetString(data); } catch (ArgumentException) { return CP.GetString(data); }
         }
@@ -404,7 +498,7 @@ namespace PTSmd
             string folder = mi.Folder.Length > 0 ? mi.Folder : DirName(relPath.Replace('/', '\\'));
             if (folder.Length > 0 && !folder.EndsWith("\\")) folder += "\\";
             string bn = BaseName(relPath);
-            var o = new List<string> { "// " + (bn.Length > 0 ? bn : "model") + " - rebuilt from the compiled .inx by PT SMD2ASE", "" };
+            var o = new List<string> { "// " + (bn.Length > 0 ? bn : "model") + " - rebuilt from the compiled .inx by PristonTale - Rosetta Stone", "" };
             if (mi.ModelFile.Length > 0) o.Add("*모양파일\t" + RelName(mi.ModelFile, folder));
             string[] lodWords = { "*정밀모양", "*보통모양", "*저질모양" };
             for (int k = 0; k < 3; k++)
@@ -604,9 +698,14 @@ namespace PTSmd
         /// folder: how the game spelled the folder it puts in front of file names (default:
         /// relInx's; only the case can differ, which the game ignores); code: the path checksum
         /// to use instead of relInx's (an .inx compiled somewhere else and copied keeps the old one).</summary>
-        public static byte[] CompileIni(string text, string relInx, int layout = 172, string folder = null, uint? code = null)
+        public static byte[] CompileIni(string text, string relInx, int layout = 172, string folder = null, uint? code = null,
+                                        Action<string> warn = null)
         {
             SourceTables();
+            int lineNo = 0;
+            void Warn(string msg) => warn?.Invoke("line " + lineNo + ": " + msg);
+            // (what follows // on a line is a comment for the reader; the game reads it as more names)
+            IEnumerable<string> Named(List<string> a) => a.TakeWhile(t => !t.StartsWith("//"));
             var itemIndex = new Dictionary<string, int>();
             for (int i = 0; i < items.Count; i++) if (!itemIndex.ContainsKey(items[i])) itemIndex[items[i]] = i;
             var skillIndex = new Dictionary<string, int>();
@@ -623,6 +722,7 @@ namespace PTSmd
             int pieces = 0, last = 0;
             foreach (string line0 in text.Replace("\r\n", "\n").Split('\n'))
             {
+                lineNo++;
                 string line = line0.Length > 511 ? line0.Substring(0, 511) : line0;
                 string head = Words(line).FirstOrDefault(w => w.Length > 0) ?? "";
                 string rest = head.Length > 0 ? line.Substring(line.IndexOf(head, StringComparison.Ordinal) + head.Length) : "";
@@ -632,6 +732,8 @@ namespace PTSmd
                 {
                     if (head.StartsWith("*") && head.Contains("동작"))
                     {
+                        if (args.Any(t => t.StartsWith("//")))
+                            Warn(head + ": the game reads text after the frames as a key letter ('/' here) - put comments on a line of their own");
                         if (mi.Motions.Count < MOTION_MAX)
                         {
                             var m = new Motion();
@@ -665,6 +767,10 @@ namespace PTSmd
                             mi.Talk.Add(m);
                         }
                     }
+                    else if (head.StartsWith("*") && head.Contains("표정"))
+                        Warn(head + " comes before any *동작모음 / *표정모음 - the game skips it");
+                    else if (head.StartsWith("*") && head != "*끝")
+                        Warn(head + " is not a model info command - the game skips the line");
                     continue;
                 }
                 switch (cmd)
@@ -710,6 +816,9 @@ namespace PTSmd
                             else if (IsHashNumber(tok)) m.Items.Add(ParseLong(tok.Substring(1)));   // an item code by number (our own form)
                             m.ItemCount = m.Items.Count;
                         }
+                        foreach (var tok in Named(args).TakeWhile(t => t != "모두"))
+                            if (tok != "없음" && !itemIndex.ContainsKey(tok) && !IsHashNumber(tok))
+                                Warn("*착용무기: no item is called '" + tok + "' - the game leaves it out");
                         break;
                     }
                     case 12:
@@ -720,12 +829,17 @@ namespace PTSmd
                         foreach (var tok in args)
                             foreach (var j in JobBits)
                                 if (string.Equals(tok.ToLowerInvariant(), j.name.ToLowerInvariant(), StringComparison.Ordinal)) { m.Jobs |= j.bit; break; }
+                        foreach (var tok in Named(args))
+                            if (!JobBits.Any(j => string.Equals(tok, j.name, StringComparison.OrdinalIgnoreCase)))
+                                Warn("*적용직업: no class is called '" + tok + "' (" + string.Join(", ", JobBits.Select(j => j.name)) + ") - the game leaves it out");
                         break;
                     }
                     case 13:
                     {
                         var m = mi.Motions[last];
                         int v = 0;
+                        foreach (var tok in Named(args))
+                            if (tok != "마을" && tok != "필드") Warn("*해당위치: '" + tok + "' is neither 마을 (town) nor 필드 (field)");
                         foreach (var tok in args.Take(2)) v |= tok == "마을" ? 1 : tok == "필드" ? 2 : 0;
                         if (v == 0 || m.State == 0x150) v = 3;
                         m.MapPos = v;
@@ -744,7 +858,11 @@ namespace PTSmd
                                 else if (IsHashNumber(tok)) m.Skills[k++] = (byte)(ParseLong(tok.Substring(1)) & 0xFF);   // a skill by number
                             }
                             m.Skills[k] = 0;
+                            foreach (var tok in Named(args))
+                                if (!skillIndex.ContainsKey(tok.ToLowerInvariant()) && !IsHashNumber(tok))
+                                    Warn("*적용기술: no skill is called '" + tok + "' - the game leaves it out");
                         }
+                        else Warn("*적용기술 belongs to a skill motion (*기술동작...) - the game ignores it here");
                         break;
                     }
                     case 15: mi.TalkLink = folder + StringArg(rest); break;
