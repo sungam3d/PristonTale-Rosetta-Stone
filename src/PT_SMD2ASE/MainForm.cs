@@ -24,6 +24,9 @@ namespace PT_SMD2ASE
         readonly CheckBox chkTex, chkVc, chkLights, chkSplit, chkOk;
         readonly RadioButton rbSplit, rbKeep, rbDrop;
         readonly CheckBox chkServer;
+        readonly ComboBox cmbLang, cmbPage;
+        /// <summary>The language was changed: Program builds the window again in it.</summary>
+        public bool RestartForLanguage;
         readonly TableLayoutPanel plugRows;
         readonly Panel warn;
         readonly Label warnLbl, status;
@@ -83,55 +86,82 @@ namespace PT_SMD2ASE
             root.Controls.Add(zones);
 
             // output folder
-            var outGrp = new GroupBox { Text = "Output folder", Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(6) };
+            var outGrp = new GroupBox { Text = L.T("grp.output"), Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(6) };
             var outRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, AutoSize = true };
             outRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             outRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             outRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             outBox = new TextBox { Dock = DockStyle.Fill, Text = st.OutDir, Margin = new Padding(3, 5, 3, 3) };
             outRow.Controls.Add(outBox, 0, 0);
-            outRow.Controls.Add(MakeButton("Change…", (s, e) => BrowseOut()), 1, 0);
-            outRow.Controls.Add(MakeButton("Open", (s, e) => OpenFolder(OutDir)), 2, 0);
+            outRow.Controls.Add(MakeButton(L.T("btn.change"), (s, e) => BrowseOut()), 1, 0);
+            outRow.Controls.Add(MakeButton(L.T("btn.open"), (s, e) => OpenFolder(OutDir)), 2, 0);
             outGrp.Controls.Add(outRow);
             root.Controls.Add(outGrp);
 
             // options
-            var opGrp = new GroupBox { Text = "Options", Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(6) };
+            var opGrp = new GroupBox { Text = L.T("grp.options"), Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(6) };
             var opt = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true };
             opt.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             opt.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            chkTex = new CheckBox { Text = "Copy + decrypt textures (the .ase points at the decoded copies)", AutoSize = true, Checked = st.Textures };
-            chkVc = new CheckBox { Text = "Baked vertex lighting (game look)", AutoSize = true, Checked = st.VertexColors };
-            chkLights = new CheckBox { Text = "Stage lights", AutoSize = true, Checked = st.Lights };
+            chkTex = new CheckBox { Text = L.T("opt.textures"), AutoSize = true, Checked = st.Textures };
+            chkVc = new CheckBox { Text = L.T("opt.vertex_colors"), AutoSize = true, Checked = st.VertexColors };
+            chkLights = new CheckBox { Text = L.T("opt.lights"), AutoSize = true, Checked = st.Lights };
             opt.Controls.Add(chkTex, 0, 0); opt.SetColumnSpan(chkTex, 2);
-            opt.Controls.Add(chkVc, 0, 1);
-            opt.Controls.Add(chkLights, 1, 1);
-            chkSplit = new CheckBox { Text = "Split maps into separate objects (like the original .ase files)", AutoSize = true, Checked = st.SplitObjects };
+            // (one row over both columns: a long label here would push the right column off the window)
+            var lightRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            lightRow.Controls.Add(chkVc);
+            lightRow.Controls.Add(chkLights);
+            opt.Controls.Add(lightRow, 0, 1); opt.SetColumnSpan(lightRow, 2);
+            chkSplit = new CheckBox { Text = L.T("opt.split"), AutoSize = true, Checked = st.SplitObjects };
             opt.Controls.Add(chkSplit, 0, 2); opt.SetColumnSpan(chkSplit, 2);
-            opt.Controls.Add(new Label { Text = "Collision walls:", AutoSize = true, Margin = new Padding(3, 7, 3, 3) }, 0, 3);
+            opt.Controls.Add(new Label { Text = L.T("opt.collision"), AutoSize = true, Margin = new Padding(3, 7, 3, 3) }, 0, 3);
             var coll = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-            rbSplit = new RadioButton { Text = "separate object", AutoSize = true, Checked = st.Collision == "split" };
-            rbKeep = new RadioButton { Text = "keep in mesh", AutoSize = true, Checked = st.Collision == "keep" };
-            rbDrop = new RadioButton { Text = "remove", AutoSize = true, Checked = st.Collision == "drop" };
+            rbSplit = new RadioButton { Text = L.T("opt.coll_split"), AutoSize = true, Checked = st.Collision == "split" };
+            rbKeep = new RadioButton { Text = L.T("opt.coll_keep"), AutoSize = true, Checked = st.Collision == "keep" };
+            rbDrop = new RadioButton { Text = L.T("opt.coll_drop"), AutoSize = true, Checked = st.Collision == "drop" };
             if (!rbKeep.Checked && !rbDrop.Checked) rbSplit.Checked = true;
             coll.Controls.AddRange(new Control[] { rbSplit, rbKeep, rbDrop });
             opt.Controls.Add(coll, 1, 3);
-            chkServer = new CheckBox { Text = "Also save the model info for the server (_server folder, Korean code page)", AutoSize = true, Checked = st.ServerCopy };
-            new ToolTip { AutoPopDelay = 20000 }.SetToolTip(chkServer,
-                "<output>\\_server holds the model info files (.ini / .inf / .in made from each .inx) again in the game's own\n" +
-                "Korean code page: the form the server and the game's tools read.");
+            chkServer = new CheckBox { Text = L.T("opt.server"), AutoSize = true, Checked = st.ServerCopy };
+            new ToolTip { AutoPopDelay = 20000 }.SetToolTip(chkServer, L.T("opt.server_tip"));
             chkServer.CheckedChanged += (s, e) => { if (scan != null && !Busy) ShowSelection(); };
             opt.Controls.Add(chkServer, 0, 4); opt.SetColumnSpan(chkServer, 2);
+            // the game client's text code page (other text than model info) and the interface language
+            var lblPage = new Label { Text = L.T("opt.codepage"), AutoSize = true, Margin = new Padding(3, 7, 3, 3) };
+            opt.Controls.Add(lblPage, 0, 5);
+            var langRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            cmbPage = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 250 };
+            foreach (var g in L.Languages.GroupBy(l => l.GameCodePage))
+                cmbPage.Items.Add(new PageItem(g.Key, string.Join(" / ", g.Select(l => l.Name)) + "  (" + g.Key + ")"));
+            cmbPage.SelectedItem = cmbPage.Items.Cast<PageItem>().FirstOrDefault(i => i.CodePage == st.TextCodePage) ?? cmbPage.Items[1];
+            new ToolTip { AutoPopDelay = 20000 }.SetToolTip(cmbPage, L.T("opt.codepage_tip"));
+            new ToolTip { AutoPopDelay = 20000 }.SetToolTip(lblPage, L.T("opt.codepage_tip"));
+            cmbPage.SelectedIndexChanged += (s, e) => st.TextCodePage = ((PageItem)cmbPage.SelectedItem).CodePage;
+            langRow.Controls.Add(cmbPage);
+            langRow.Controls.Add(new Label { Text = "   " + L.T("lang.label"), AutoSize = true, Margin = new Padding(12, 7, 3, 3) });
+            cmbLang = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 170 };
+            cmbLang.Items.AddRange(L.Languages);
+            cmbLang.SelectedItem = L.Find(L.Current);
+            cmbLang.SelectedIndexChanged += (s, e) =>
+            {
+                var l = (L.Language)cmbLang.SelectedItem;
+                if (l.Code == L.Current || Busy) return;
+                st.Lang = l.Code;
+                RestartForLanguage = true;
+                Close();                                    // Program opens the window again in the new language
+            };
+            langRow.Controls.Add(cmbLang);
+            opt.Controls.Add(langRow, 1, 5);
             opGrp.Controls.Add(opt);
             root.Controls.Add(opGrp);
 
             // 3ds Max / Blender plug-ins
-            var plugGrp = new GroupBox { Text = "3ds Max / Blender plug-ins", Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(6) };
+            var plugGrp = new GroupBox { Text = L.T("grp.plugins"), Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(6) };
             plugRows = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, AutoSize = true };
             plugRows.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             plugRows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             plugRows.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            plugRows.Controls.Add(new Label { Text = "Looking for 3ds Max and Blender…", AutoSize = true, Margin = new Padding(3, 6, 3, 3) }, 0, 0);
+            plugRows.Controls.Add(new Label { Text = L.T("plug.looking"), AutoSize = true, Margin = new Padding(3, 6, 3, 3) }, 0, 0);
             plugGrp.Controls.Add(plugRows);
             root.Controls.Add(plugGrp);
 
@@ -142,7 +172,7 @@ namespace PT_SMD2ASE
             var warnTbl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, AutoSize = true, BackColor = warn.BackColor };
             warnLbl = new Label { AutoSize = true, ForeColor = Color.FromArgb(92, 68, 0), Font = new Font("Segoe UI", 9.5f),
                                   MaximumSize = new Size(700, 0) };
-            chkOk = new CheckBox { Text = "I understand, continue", AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            chkOk = new CheckBox { Text = L.T("warn.ok"), AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
                                    ForeColor = Color.FromArgb(92, 68, 0), Margin = new Padding(0, 6, 0, 0) };
             chkOk.CheckedChanged += (s, e) => UpdateButtons();
             warnTbl.Controls.Add(warnLbl, 0, 0);
@@ -152,10 +182,10 @@ namespace PT_SMD2ASE
 
             // actions
             var act = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false };
-            btnGo = new Button { Text = "Convert", AutoSize = true, Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+            btnGo = new Button { Text = L.T("btn.convert"), AutoSize = true, Font = new Font("Segoe UI", 10f, FontStyle.Bold),
                                  Padding = new Padding(14, 4, 14, 4), Enabled = false };
             btnGo.Click += (s, e) => Start();
-            btnCancel = MakeButton("Cancel", (s, e) => { cts?.Cancel(); status.Text = "Cancelling after the current file…"; });
+            btnCancel = MakeButton(L.T("btn.cancel"), (s, e) => { cts?.Cancel(); status.Text = L.T("status.cancelling"); });
             btnCancel.Enabled = false;
             btnCancel.Margin = new Padding(8, 8, 3, 3);
             status = new Label { AutoSize = true, Margin = new Padding(12, 12, 3, 3) };
@@ -200,7 +230,7 @@ namespace PT_SMD2ASE
                 if (mine.Count == 0)
                 {
                     plugRows.Controls.Add(new Label { Text = app, AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(3, 6, 12, 3) }, 0, row);
-                    plugRows.Controls.Add(new Label { Text = "not found on this PC", AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(3, 6, 3, 3) }, 1, row);
+                    plugRows.Controls.Add(new Label { Text = L.T("plug.not_found"), AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(3, 6, 3, 3) }, 1, row);
                     row++;
                     continue;
                 }
@@ -216,7 +246,7 @@ namespace PT_SMD2ASE
                     plugRows.Controls.Add(lbl, 1, row);
                     if (t.Supported)
                     {
-                        var b = MakeButton(t.Installed ? (t.UpToDate ? "Reinstall" : "Update") : "Install", null);
+                        var b = MakeButton(L.T(t.Installed ? (t.UpToDate ? "plug.reinstall" : "plug.update") : "plug.install"), null);
                         b.Click += (s, e) => InstallPlugin(target, b);
                         plugRows.Controls.Add(b, 2, row);
                     }
@@ -230,14 +260,13 @@ namespace PT_SMD2ASE
         {
             // a running Blender that saves its preferences on quit would switch the new add-on off again
             if (t.App == "Blender" && Process.GetProcessesByName("blender").Length > 0 && !QuietForTests &&
-                MessageBox.Show(this, "Blender is open. Please close it first: when Blender saves its preferences on quit, " +
-                                      "it can switch the newly installed add-on off again.\n\nInstall anyway?", AppName,
+                MessageBox.Show(this, L.T("plug.blender_open"), AppName,
                                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 return;
             b.Enabled = false;
             string was = b.Text;
-            b.Text = "Installing…";
-            Log("=== Installing the plug-in into " + t.Name + " ===", Head);
+            b.Text = L.T("plug.installing");
+            Log(L.T("plug.log_installing", t.Name), Head);
             Task.Run(() => Plugins.Install(t)).ContinueWith(task =>
             {
                 var r = task.IsFaulted ? (false, t.Name + ": " + task.Exception.GetBaseException().Message) : task.Result;
@@ -271,12 +300,7 @@ namespace PT_SMD2ASE
             z.DragLeave += (s, e) => z.BackColor = enc ? EncBack : DropBack;
             z.DragDrop += OnDragDrop;
             z.Click += (s, e) => BrowseFiles(enc);
-            new ToolTip { AutoPopDelay = 20000 }.SetToolTip(z, enc
-                ? "Edited files back into the forms the game uses:\n.ini / .inf / .in → .inx (+ Korean code page text), " +
-                  ".wav → game sound header,\n.bmp / .tga → game texture header, other UTF-8 text → Korean code page.\n" +
-                  "Written to <output folder>\\game_format. Keep the game's folder names (char\\monster\\...)."
-                : "Game files into forms you can open: .smd → .ase, textures, sounds, Korean text → UTF-8,\n" +
-                  ".inx → .ini / .inf / .in. Written to the output folder in the game's folder layout.");
+            new ToolTip { AutoPopDelay = 20000 }.SetToolTip(z, L.T(enc ? "enc.tip" : "dec.tip"));
             return z;
         }
 
@@ -284,8 +308,8 @@ namespace PT_SMD2ASE
         {
             var row = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false,
                                             Margin = enc ? new Padding(5, 2, 0, 0) : new Padding(0, 2, 5, 0) };
-            row.Controls.Add(MakeButton("Browse file(s)…", (s, e) => BrowseFiles(enc)));
-            row.Controls.Add(MakeButton("Browse folder…", (s, e) => BrowseFolder(enc)));
+            row.Controls.Add(MakeButton(L.T("btn.browse_files"), (s, e) => BrowseFiles(enc)));
+            row.Controls.Add(MakeButton(L.T("btn.browse_folder"), (s, e) => BrowseFolder(enc)));
             return row;
         }
 
@@ -295,23 +319,26 @@ namespace PT_SMD2ASE
         void SetDropText(string extra)
         {
             // (with a selection or result the box shows only that: the half-width box has no room for both)
-            drop.Text = "DECODE   game → readable\n\n" + (extra != null ? Wrap(extra) :
-                        "⇩  Drop the game folder, any folder,\nor .smd / .inx / .wav files here  ⇩\n(or click to browse)");
+            drop.Text = L.T("dec.title") + "\n\n" + (extra ?? L.T("dec.hint"));
         }
 
         void SetEncText(string extra)
         {
-            dropEnc.Text = "ENCODE   readable → game\n\n" + (extra != null ? Wrap(extra) :
-                           "⇩  Drop edited .ini / .inf / .in, .wav,\n.bmp / .tga files or folders here  ⇩\n(or click to browse)");
+            dropEnc.Text = L.T("enc.title") + "\n\n" + (extra ?? L.T("enc.hint"));
         }
 
-        // "Selected: x  -  a, b, c" / "Done: a, b, c" -> one item per line
-        static string Wrap(string s)
+        // a heading and one item per line (the half-width boxes have no room for long lines)
+        static string Lines(string head, IEnumerable<string> items) => head + "\n" + string.Join("\n", items);
+
+        sealed class PageItem
         {
-            s = s.Replace("  -  ", "\n");
-            if (s.StartsWith("Done: ")) s = "Done:\n" + s.Substring(6);
-            return s.Replace(", ", "\n");
+            public readonly int CodePage; readonly string text;
+            public PageItem(int cp, string t) { CodePage = cp; text = t; }
+            public override string ToString() => text;
         }
+
+        string Names(string[] paths) => paths.Length > 1 ? L.T("sel.more", Path.GetFileName(paths[0].TrimEnd('\\')), paths.Length - 1)
+                                                        : Path.GetFileName(paths[0].TrimEnd('\\'));
 
         void Log(string s, Color c)
         {
@@ -357,12 +384,12 @@ namespace PT_SMD2ASE
         {
             if (Busy) return;
             using (var d = enc
-                ? new OpenFileDialog { Title = "Choose edited file(s) to put back into game format",
-                                       Filter = "Edited files (*.ini;*.inf;*.in;*.wav;*.bmp;*.tga;*.sin;*.msg;*.txt)|*.ini;*.inf;*.in;*.wav;*.bmp;*.tga;*.sin;*.msg;*.txt|All files (*.*)|*.*",
+                ? new OpenFileDialog { Title = L.T("dlg.enc_files"),
+                                       Filter = L.T("dlg.edited_files") + " (*.ase;*.ini;*.inf;*.in;*.wav;*.bmp;*.tga;*.sin;*.msg;*.txt)|*.ase;*.ini;*.inf;*.in;*.wav;*.bmp;*.tga;*.sin;*.msg;*.txt|" + L.T("dlg.all_files") + " (*.*)|*.*",
                                        Multiselect = true, InitialDirectory = OutDir }
-                : new OpenFileDialog { Title = "Choose game file(s)",
-                                       Filter = "Game files (*.smd;*.inx;*.wav;*.bgm;*.bmp;*.tga;*.inf;*.ini;*.in;*.sin;*.msg)|" +
-                                                "*.smd;*.inx;*.wav;*.bgm;*.bmp;*.tga;*.inf;*.ini;*.in;*.sin;*.msg|Priston Tale SMD (*.smd)|*.smd|All files (*.*)|*.*",
+                : new OpenFileDialog { Title = L.T("dlg.dec_files"),
+                                       Filter = L.T("dlg.game_files") + " (*.smd;*.inx;*.wav;*.bgm;*.bmp;*.tga;*.inf;*.ini;*.in;*.sin;*.msg)|" +
+                                                "*.smd;*.inx;*.wav;*.bgm;*.bmp;*.tga;*.inf;*.ini;*.in;*.sin;*.msg|Priston Tale SMD (*.smd)|*.smd|" + L.T("dlg.all_files") + " (*.*)|*.*",
                                        Multiselect = true, InitialDirectory = st.LastIn })
                 if (d.ShowDialog(this) == DialogResult.OK) { if (enc) OnEncode(d.FileNames); else OnInput(d.FileNames); }
         }
@@ -372,8 +399,7 @@ namespace PT_SMD2ASE
             if (Busy) return;
             using (var d = new FolderBrowserDialog
                    {
-                       Description = enc ? "Choose a folder with edited files. Keep the game's folder names (char\\monster\\...) so each .inx comes out right."
-                                         : "Choose the game folder, or any folder below it (searched recursively)",
+                       Description = L.T(enc ? "dlg.enc_folder" : "dlg.dec_folder"),
                        SelectedPath = enc ? OutDir : st.LastIn,
                    })
                 if (d.ShowDialog(this) == DialogResult.OK) { if (enc) OnEncode(new[] { d.SelectedPath }); else OnInput(new[] { d.SelectedPath }); }
@@ -381,7 +407,7 @@ namespace PT_SMD2ASE
 
         void BrowseOut()
         {
-            using (var d = new FolderBrowserDialog { Description = "Output folder", SelectedPath = OutDir })
+            using (var d = new FolderBrowserDialog { Description = L.T("dlg.output"), SelectedPath = OutDir })
                 if (d.ShowDialog(this) == DialogResult.OK) outBox.Text = d.SelectedPath;
         }
 
@@ -394,7 +420,7 @@ namespace PT_SMD2ASE
 
         void OnInput(string[] paths)
         {
-            if (Busy) { Log("Busy - wait for the current conversion to finish.", Warn); return; }
+            if (Busy) { Log(L.T("busy"), Warn); return; }
             inputs = paths.Select(Path.GetFullPath).ToArray();
             st.LastIn = File.Exists(inputs[0]) ? Path.GetDirectoryName(inputs[0]) : inputs[0];
             ShowSelection();
@@ -416,24 +442,19 @@ namespace PT_SMD2ASE
             if (whole) { scan = sc; ShowClientSelection(); return; }
             if (pending.Count == 0)
             {
-                SetDropText("Nothing to convert in what you dropped.");
-                Log("No game files found in: " + string.Join("; ", inputs), Warn);
+                SetDropText(L.T("sel.nothing"));
+                Log(L.T("log.no_files", string.Join("; ", inputs)), Warn);
                 UpdateButtons();
                 return;
             }
             long bytes = Batch.TotalBytes(pending);
-            string names = Path.GetFileName(inputs[0].TrimEnd('\\')) + (inputs.Length > 1 ? " (+" + (inputs.Length - 1) + " more)" : "");
-            SetDropText(string.Format("Selected: {0}  -  {1} .smd file(s), {2:0.0} MB", names, pending.Count, bytes / 1e6));
+            SetDropText(Lines(L.T("sel.selected", Names(inputs)), new[] { L.T("sel.smd", pending.Count, (bytes / 1e6).ToString("0.0")) }));
             bool folder = inputs.Any(Directory.Exists);
             if (folder || pending.Count > 1)
             {
                 double est = bytes / 1e6 / MbPerSec + 1;
-                warnLbl.Text = string.Format(
-                    "⚠  This contains {0} .smd files ({1:0} MB). Converting them may take some time - roughly {2}{3} - " +
-                    "and writes about {4:0} MB of .ase files{5}.\nTick the box below to continue.",
-                    pending.Count, bytes / 1e6, FmtTime(est),
-                    chkTex.Checked ? " (longer the first time textures are decoded)" : "",
-                    bytes / 1e6 * 3.4, chkTex.Checked ? " plus decoded textures" : "");
+                warnLbl.Text = L.T("warn.smd", pending.Count, (bytes / 1e6).ToString("0"), FmtTime(est),
+                    chkTex.Checked ? L.T("warn.smd_tex_time") : "", (bytes / 1e6 * 3.4).ToString("0"), chkTex.Checked ? L.T("warn.smd_tex_size") : "");
                 needConfirm = true;
                 warn.Visible = true;
                 UpdateButtons();
@@ -447,7 +468,7 @@ namespace PT_SMD2ASE
 
         ClientSettings ClientOptions() => new ClientSettings
         {
-            OutDir = OutDir, Textures = chkTex.Checked, ServerCopy = chkServer.Checked,
+            OutDir = OutDir, Textures = chkTex.Checked, ServerCopy = chkServer.Checked, TextCodePage = ((PageItem)cmbPage.SelectedItem).CodePage,
         };
 
         void ShowClientSelection()
@@ -455,21 +476,20 @@ namespace PT_SMD2ASE
             if (scan == null) scan = ClientConvert.ScanInputs(inputs);
             var c = ClientOptions();
             var F = ClientConvert.FileKind.Model;
-            string names = Path.GetFileName(inputs[0].TrimEnd('\\')) + (inputs.Length > 1 ? " (+" + (inputs.Length - 1) + " more)" : "");
             var parts = new List<string>();
-            void Part(bool on, ClientConvert.FileKind k, string what) { if (on && scan[k] > 0) parts.Add(scan[k] + " " + what); }
-            Part(c.Models, F, "models");
-            Part(c.Textures, ClientConvert.FileKind.Texture, "textures");
-            Part(c.Sounds, ClientConvert.FileKind.Sound, "sounds");
-            Part(c.Text, ClientConvert.FileKind.Text, "text files");
-            Part(c.ModelInfo, ClientConvert.FileKind.ModelInfo, "model info files");
+            void Part(bool on, ClientConvert.FileKind k, string key) { if (on && scan[k] > 0) parts.Add(L.T(key, scan[k])); }
+            Part(c.Models, F, "kind.models");
+            Part(c.Textures, ClientConvert.FileKind.Texture, "kind.textures");
+            Part(c.Sounds, ClientConvert.FileKind.Sound, "kind.sounds");
+            Part(c.Text, ClientConvert.FileKind.Text, "kind.texts");
+            Part(c.ModelInfo, ClientConvert.FileKind.ModelInfo, "kind.infos");
             if (parts.Count == 0)
             {
-                SetDropText("Nothing to convert in what you dropped.");
+                SetDropText(L.T("sel.nothing"));
                 UpdateButtons();
                 return;
             }
-            SetDropText("Selected: " + names + "  -  " + string.Join(", ", parts));
+            SetDropText(Lines(L.T("sel.selected", Names(inputs)), parts));
             double smdMb = c.Models ? scan.BytesOf(F) / 1e6 : 0;
             double restMb = (c.Textures ? scan.BytesOf(ClientConvert.FileKind.Texture) : 0) / 1e6 +
                             (c.Sounds ? scan.BytesOf(ClientConvert.FileKind.Sound) : 0) / 1e6;
@@ -478,11 +498,9 @@ namespace PT_SMD2ASE
             {
                 double est = smdMb / ModelMbPerSec + restMb / RestMbPerSec + scan[ClientConvert.FileKind.Text] / 1000.0 + 1;
                 double outMb = smdMb * 3.4 + restMb;
-                warnLbl.Text = string.Format(
-                    "⚠  Converting {0} may take some time - roughly {1} - and writes about {2} into the output folder, " +
-                    "in the same folder layout as the game.{3}\nTick the box below to continue.",
-                    string.Join(", ", parts), FmtTime(est), outMb >= 1000 ? (outMb / 1000).ToString("0.0") + " GB" : outMb.ToString("0") + " MB",
-                    c.ServerCopy && scan[ClientConvert.FileKind.ModelInfo] > 0 ? "\nThe model info also goes into _server\\ in the game's Korean code page (for the server)." : "");
+                warnLbl.Text = L.T("warn.whole", string.Join(", ", parts), FmtTime(est),
+                    outMb >= 1000 ? (outMb / 1000).ToString("0.0") + " GB" : outMb.ToString("0") + " MB",
+                    c.ServerCopy && scan[ClientConvert.FileKind.ModelInfo] > 0 ? L.T("warn.whole_server") : "");
                 needConfirm = true;
                 warn.Visible = true;
                 UpdateButtons();
@@ -497,25 +515,24 @@ namespace PT_SMD2ASE
         // encode: edited files -> <output>\game_format, straight away (it is quick)
         void OnEncode(string[] paths)
         {
-            if (Busy) { Log("Busy - wait for the current conversion to finish.", Warn); return; }
+            if (Busy) { Log(L.T("busy"), Warn); return; }
             paths = paths.Select(Path.GetFullPath).ToArray();
             Converter.ClearClientCache();                       // (folders may have changed since the last drop)
             string outDir = Path.GetFullPath(Path.Combine(OutDir, "game_format")).TrimEnd('\\');
-            string names = Path.GetFileName(paths[0].TrimEnd('\\')) + (paths.Length > 1 ? " (+" + (paths.Length - 1) + " more)" : "");
+            string names = Names(paths);
             // the game folder itself is not edited files (it would copy the whole client)
             string game = paths.FirstOrDefault(p => Directory.Exists(p) && ClientConvert.LooksLikeClient(p) && Directory.EnumerateFiles(p, "*.exe").Any());
             if (game != null)
             {
-                SetEncText("That is the game folder itself - drop the folder with your edited files");
-                Log("ENCODE is for the files you edited (in the output folder, " + OutDir + "). " + game +
-                    " is the game folder: drop it on DECODE to get readable copies.", Warn);
+                SetEncText(L.T("enc.gamefolder_box"));
+                Log(L.T("enc.gamefolder_log", OutDir, game), Warn);
                 return;
             }
             // (inside a dropped output folder, _server and an earlier game_format are left out)
             var files = ClientConvert.ToGameFiles(paths, outDir);
-            if (files.Count == 0) { SetEncText("Nothing to encode in " + names + "."); return; }
-            SetEncText("Encoding " + names + " …");
-            Log("=== Encoding back to game format: " + files.Count + " file(s) -> " + outDir + " ===", Head);
+            if (files.Count == 0) { SetEncText(L.T("enc.nothing", names)); return; }
+            SetEncText(L.T("enc.encoding", names));
+            Log(L.T("enc.log_start", files.Count, outDir), Head);
             bool quiet = files.Count > 300;                       // (a whole folder: notes and errors only)
             prog.Maximum = Math.Max(1, files.Count);
             prog.Value = 0;
@@ -535,17 +552,17 @@ namespace PT_SMD2ASE
                             lastShown = i;
                             BeginInvoke(new Action(() => { status.Text = string.Format("({0}/{1}) {2}", Math.Min(i + 1, n), n, rel); SetProgress(i); }));
                         },
-                        token);
+                        token, ((PageItem)cmbPage.SelectedItem).CodePage);
                 }
-                catch (Exception ex) { BeginInvoke(new Action(() => Log("Unexpected error: " + ex.Message, Err))); r = new ClientConvert.ToGameResult(); }
+                catch (Exception ex) { BeginInvoke(new Action(() => Log(L.T("err.unexpected", ex.Message), Err))); r = new ClientConvert.ToGameResult(); }
                 BeginInvoke(new Action(() =>
                 {
                     worker = null;
                     if (!r.Cancelled) SetProgress(prog.Maximum);
-                    Log("=== " + r.Summary() + (r.Cancelled ? " (cancelled)" : "") + " ===", r.Failed > 0 ? Err : Head);
-                    if (r.Notes > 0) Log("Read the notes above: they say what was put right, or what the game will not read as you meant.", Warn);
-                    status.Text = "Done: " + r.Summary();
-                    SetEncText("Done: " + r.Summary());
+                    Log("=== " + r.Summary() + (r.Cancelled ? L.T("done.cancelled") : "") + " ===", r.Failed > 0 ? Err : Head);
+                    if (r.Notes > 0) Log(L.T("enc.read_notes"), Warn);
+                    status.Text = L.T("done.prefix", r.Summary());
+                    SetEncText(Lines(L.T("done.box"), r.SummaryParts()));
                     UpdateButtons();
                     if (!QuietForTests && !r.Cancelled && r.Inx + r.Sounds + r.Textures + r.Texts > 0) OpenFolder(outDir);
                 }));
@@ -563,9 +580,9 @@ namespace PT_SMD2ASE
 
         static string FmtTime(double s)
         {
-            if (s < 1.5) return "1 second";
-            if (s < 60) return Math.Round(s) + " seconds";
-            return string.Format("{0} min {1:00} s", (int)(s / 60), (int)(s % 60));
+            if (s < 1.5) return L.T("time.second");
+            if (s < 60) return L.T("time.seconds", Math.Round(s));
+            return L.T("time.minutes", (int)(s / 60), ((int)(s % 60)).ToString("00"));
         }
 
         // ------------------------------------------------------------- conversion
@@ -575,7 +592,7 @@ namespace PT_SMD2ASE
             if (pending.Count == 0 || Busy || (needConfirm && !chkOk.Checked)) return;
             string outDir = OutDir;
             try { Directory.CreateDirectory(outDir); }
-            catch (Exception ex) { MessageBox.Show(this, "Cannot create the output folder:\n" + ex.Message, AppName); return; }
+            catch (Exception ex) { MessageBox.Show(this, L.T("err.outdir", ex.Message), AppName); return; }
             SaveSettings();
             var files = pending;
             pending = new List<string>();
@@ -594,7 +611,7 @@ namespace PT_SMD2ASE
             warn.Visible = false;
             prog.Maximum = files.Count;
             prog.Value = 0;
-            Log(string.Format("=== Converting {0} file(s) -> {1} ===", files.Count, outDir), Head);
+            Log(L.T("log.converting", files.Count, outDir), Head);
             cts = new CancellationTokenSource();
             var token = cts.Token;
             worker = Task.Run(() =>
@@ -608,12 +625,12 @@ namespace PT_SMD2ASE
                             status.Text = string.Format("({0}/{1}) {2}", i + 1, files.Count, Path.GetFileName(f));
                             SetProgress(i);
                         })),
-                        (line, ok) => BeginInvoke(new Action(() => Log(line, ok ? Ok : (line.StartsWith("Cancel") ? Warn : Err)))),
+                        (line, ok) => BeginInvoke(new Action(() => Log(line, ok ? Ok : (line == L.T("log.cancelled") ? Warn : Err)))),
                         token);
                 }
                 catch (Exception ex)
                 {
-                    BeginInvoke(new Action(() => Log("Unexpected error: " + ex, Err)));
+                    BeginInvoke(new Action(() => Log(L.T("err.unexpected", ex), Err)));
                     r = new BatchResult();
                 }
                 BeginInvoke(new Action(() => Done(r, files.Count)));
@@ -626,7 +643,7 @@ namespace PT_SMD2ASE
             if (scan == null || scan.Files.Count == 0 || Busy || (needConfirm && !chkOk.Checked)) return;
             var c = ClientOptions();
             try { Directory.CreateDirectory(c.OutDir); }
-            catch (Exception ex) { MessageBox.Show(this, "Cannot create the output folder:\n" + ex.Message, AppName); return; }
+            catch (Exception ex) { MessageBox.Show(this, L.T("err.outdir", ex.Message), AppName); return; }
             SaveSettings();
             c.Template.SplitCollision = !rbKeep.Checked;
             c.Template.DropCollision = rbDrop.Checked;
@@ -639,8 +656,8 @@ namespace PT_SMD2ASE
             warn.Visible = false;
             prog.Maximum = Math.Max(1, sc.Files.Count);
             prog.Value = 0;
-            Log(string.Format("=== Converting the game files ({0} files) -> {1} ===", sc.Files.Count, c.OutDir), Head);
-            foreach (var r0 in sc.Roots) Log("game folder: " + r0, Head);
+            Log(L.T("log.converting_game", sc.Files.Count, c.OutDir), Head);
+            foreach (var r0 in sc.Roots) Log(L.T("log.game_folder", r0), Head);
             cts = new CancellationTokenSource();
             var token = cts.Token;
             int lastShown = -1;
@@ -656,12 +673,12 @@ namespace PT_SMD2ASE
                             lastShown = i;
                             BeginInvoke(new Action(() => { status.Text = string.Format("({0}/{1}) {2}", Math.Min(i + 1, n), n, rel); SetProgress(i); }));
                         },
-                        (line, ok) => { if (!ok) BeginInvoke(new Action(() => Log(line, line.StartsWith("Cancel") ? Warn : Err))); },
+                        (line, ok) => { if (!ok) BeginInvoke(new Action(() => Log(line, line == L.T("log.cancelled") ? Warn : Err))); },
                         token);
                 }
                 catch (Exception ex)
                 {
-                    BeginInvoke(new Action(() => Log(ex is ArgumentException ? ex.Message : "Unexpected error: " + ex, Err)));
+                    BeginInvoke(new Action(() => Log(ex is ArgumentException ? ex.Message : L.T("err.unexpected", ex), Err)));
                     r = new ClientResult();
                 }
                 BeginInvoke(new Action(() => DoneClient(r, c.OutDir)));
@@ -673,16 +690,16 @@ namespace PT_SMD2ASE
         {
             worker = null;
             if (!r.Cancelled) SetProgress(prog.Maximum);
-            string summary = r.Summary() + " in " + FmtTime(r.Elapsed.TotalSeconds);
-            status.Text = "Done: " + summary;
+            string summary = L.T("summary.time", r.Summary(), FmtTime(r.Elapsed.TotalSeconds));
+            status.Text = L.T("done.prefix", summary);
             Log("=== " + summary + " ===", r.Failed > 0 ? Err : Head);
-            if (r.ServerDir != null) Log("Model info for the server (Korean code page): " + r.ServerDir, Head);
+            if (r.ServerDir != null) Log(L.T("log.server_dir", r.ServerDir), Head);
             if (r.MissingReport != null)
-                Log(string.Format("{0} referenced texture(s) are not in the game folder - listed in {1}", r.Missing.Count, r.MissingReport), Warn);
-            SetDropText("Done - drop more files to convert again.");
+                Log(L.T("log.missing", r.Missing.Count, r.MissingReport), Warn);
+            SetDropText(L.T("done.again"));
             UpdateButtons();
             if (r.Files > 0 && !r.Cancelled && !QuietForTests &&
-                MessageBox.Show(this, "Done: " + r.Summary() + ".\n\nOpen the output folder?", AppName,
+                MessageBox.Show(this, L.T("msg.open_out", L.T("done.prefix", r.Summary())), AppName,
                                 MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                 OpenFolder(outDir);
         }
@@ -691,18 +708,19 @@ namespace PT_SMD2ASE
         {
             worker = null;
             if (!r.Cancelled) SetProgress(prog.Maximum);
-            string summary = string.Format("{0} converted, {1} failed{2} in {3}", r.Ok, r.Failed,
-                r.Skipped > 0 ? ", " + r.Skipped + " skipped" : "", FmtTime(r.Elapsed.TotalSeconds));
-            status.Text = "Done: " + summary;
+            var counts = new List<string> { L.T("kind.converted", r.Ok), L.T("kind.failed", r.Failed) };
+            if (r.Skipped > 0) counts.Add(L.T("kind.skipped", r.Skipped));
+            string summary = L.T("summary.time", string.Join(", ", counts), FmtTime(r.Elapsed.TotalSeconds));
+            status.Text = L.T("done.prefix", summary);
             Log("=== " + summary + " ===", r.Failed > 0 ? Err : Head);
             if (r.MissingReport != null)
-                Log(string.Format("{0} referenced texture(s) are not in the game folder - listed in {1}", r.Missing.Count, r.MissingReport), Warn);
-            if (pending.Count == 0) SetDropText("Done - drop more files to convert again.");
+                Log(L.T("log.missing", r.Missing.Count, r.MissingReport), Warn);
+            if (pending.Count == 0) SetDropText(L.T("done.again"));
             UpdateButtons();
             if (r.Ok > 0 && !QuietForTests)
             {
-                var ans = MessageBox.Show(this, r.Ok + " file(s) converted" + (r.Failed > 0 ? ", " + r.Failed + " failed" : "") +
-                                          ".\n\nOpen the output folder?", AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                var ans = MessageBox.Show(this, L.T("msg.open_out", string.Join(", ", r.Failed > 0 ? counts.Take(2) : counts.Take(1))),
+                                          AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Information);
                 if (ans == DialogResult.Yes)
                 {
                     if (r.Outputs.Count == 1) Process.Start("explorer.exe", "/select,\"" + r.Outputs[0] + "\"");
@@ -722,6 +740,7 @@ namespace PT_SMD2ASE
             st.SplitObjects = chkSplit.Checked;
             st.Collision = rbKeep.Checked ? "keep" : rbDrop.Checked ? "drop" : "split";
             st.ServerCopy = chkServer.Checked;
+            st.TextCodePage = ((PageItem)cmbPage.SelectedItem).CodePage;
             if (WindowState == FormWindowState.Normal) { st.Width = ClientSize.Width; st.Height = ClientSize.Height; }
             st.Save();
         }
@@ -730,17 +749,20 @@ namespace PT_SMD2ASE
         {
             if (Busy)
             {
-                if (MessageBox.Show(this, "A conversion is running. Stop it and quit?", AppName, MessageBoxButtons.YesNo) != DialogResult.Yes)
+                if (MessageBox.Show(this, L.T("msg.quit_running"), AppName, MessageBoxButtons.YesNo) != DialogResult.Yes)
                 {
                     e.Cancel = true;
                     return;
                 }
                 cts?.Cancel();
             }
-            SaveSettings();
+            if (!NoSaveForTests || RestartForLanguage) SaveSettings();
         }
 
+        public bool NoSaveForTests;
+
         // test hooks
+        public void TestShowOnly(string[] p) => OnInput(p);     // (a folder: shows what's in it and waits)
         public void TestInput(string[] p) => OnInput(p);
         public void TestTick() => chkOk.Checked = true;
         public void TestConvert() => btnGo.PerformClick();
@@ -751,5 +773,6 @@ namespace PT_SMD2ASE
         public void TestSetOut(string d) => outBox.Text = d;
         public bool TestWhole => whole;
         public void TestEncode(string[] p) => OnEncode(p);
+        public void TestSetLanguage(string code) => cmbLang.SelectedItem = L.Find(code);
     }
 }

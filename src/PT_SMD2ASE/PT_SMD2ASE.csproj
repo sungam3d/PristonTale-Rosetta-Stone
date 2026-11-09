@@ -9,7 +9,7 @@
     <AssemblyName>PT_RosettaStone</AssemblyName>
     <RootNamespace>PT_SMD2ASE</RootNamespace>
     <ApplicationIcon>PT_SMD2ASE.ico</ApplicationIcon>
-    <Version>1.4.1</Version>
+    <Version>1.5.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>PristonTale - Rosetta Stone</Product>
     <Description>Converts Priston Tale game files (models, textures, sounds, text, model info) to readable formats</Description>
@@ -23,5 +23,6 @@
     <Compile Include="..\PTSmd\*.cs" Link="PTSmd\%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\smdanim\data\items.txt" LogicalName="PTSmd.data.items.txt" />
     <EmbeddedResource Include="..\..\smdanim\data\skills.txt" LogicalName="PTSmd.data.skills.txt" />
+    <EmbeddedResource Include="..\PTSmd\lang\*.txt" LogicalName="PTSmd.lang.%(Filename).txt" />
   </ItemGroup>
 </Project>

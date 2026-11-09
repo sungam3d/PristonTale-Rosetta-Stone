@@ -18,6 +18,8 @@ namespace PT_SMD2ASE
         public bool Textures = true, VertexColors = true, Lights = true, SplitObjects = true;
         public bool ServerCopy = true;          // whole game folder: _server copy of the model info
         public int Width = 800, Height = 860;
+        public string Lang = "";                // interface language (L.Languages code); "" = Windows' language
+        public int TextCodePage = 949;          // the game client's text code page (model info is always 949)
 
         public static Settings Load()
         {
@@ -40,6 +42,8 @@ namespace PT_SMD2ASE
                 if (d.TryGetValue("lights", out v)) s.Lights = v == "1";
                 if (d.TryGetValue("split_objects", out v)) s.SplitObjects = v == "1";
                 if (d.TryGetValue("server_copy", out v)) s.ServerCopy = v == "1";
+                if (d.TryGetValue("lang", out v)) s.Lang = v;
+                if (d.TryGetValue("text_code_page", out v) && int.TryParse(v, out int cp)) s.TextCodePage = cp;
                 if (d.TryGetValue("width", out v) && int.TryParse(v, out int w) && w >= 640) s.Width = w;
                 if (d.TryGetValue("height", out v) && int.TryParse(v, out int h) && h >= 800) s.Height = h;   // (smaller: saved before the plug-in panel)
             }
@@ -56,7 +60,8 @@ namespace PT_SMD2ASE
                 {
                     "out=" + OutDir, "last_in=" + LastIn, "collision=" + Collision,
                     "textures=" + (Textures ? 1 : 0), "vertex_colors=" + (VertexColors ? 1 : 0), "lights=" + (Lights ? 1 : 0), "split_objects=" + (SplitObjects ? 1 : 0),
-                    "server_copy=" + (ServerCopy ? 1 : 0),
+                    "server_copy=" + (ServerCopy ? 1 : 0), "lang=" + Lang,
+                    "text_code_page=" + TextCodePage.ToString(CultureInfo.InvariantCulture),
                     "width=" + Width.ToString(CultureInfo.InvariantCulture), "height=" + Height.ToString(CultureInfo.InvariantCulture),
                 });
             }

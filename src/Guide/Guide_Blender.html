@@ -52,6 +52,7 @@
 <main>
 
 <h1>PT Tools for Blender</h1>
+<p class="note">Other languages: right-click the page and choose <b>Translate</b> (Chrome, Edge), or use your browser's translation add-on.</p>
 <p class="lead">Convert Priston Tale game files and work with them in Blender 4.2 or newer (tested on 5.2):
 maps, weapons and items, monsters and characters, with textures, skeletons and animation.
 (Using 3ds Max? Open <code>Guide_3dsMax.html</code> instead.)</p>
@@ -135,7 +136,7 @@ maps, weapons and items, monsters and characters, with textures, skeletons and a
   <tr><th>Option</th><th>What it does</th></tr>
   <tr><td>Copy + decrypt textures</td><td>The game's textures are scrambled. This writes readable copies into a <code>textures</code>
       folder in the output folder. <b>Leave it ticked.</b></td></tr>
-  <tr><td>Baked vertex lighting</td><td>Keeps the game's lighting and shadows on maps. Untick it for maps you will put back into the game.</td></tr>
+  <tr><td>Baked vertex lighting</td><td>Keeps the game's lighting and shadows on maps. Leave it ticked: ENCODE gives the map exactly this lighting back.</td></tr>
   <tr><td>Stage lights</td><td>Writes a map's light points (lamps, fires) as lights.</td></tr>
   <tr><td>Split maps into separate objects</td><td>Cuts a map into separate objects (buildings, trees, terrain…), close to
       how the original <code>.ase</code> files were made. Untick it to get the whole map as one mesh.</td></tr>
@@ -162,6 +163,7 @@ Everything comes out readable, in the game's own folder layout:</p>
   <tr><td><code>_server\</code></td><td>The model info files again in the game's Korean code page: the form the server reads</td></tr>
 </table></div>
 <p>The <b>Encode</b> box (top right) goes the other way for files you edited, straight away:
+<code>.ase</code> maps and models → <code>.smd</code> (and <code>.smb</code>, see <a href="#game">section 11</a>),
 <code>.ini</code> / <code>.inf</code> / <code>.in</code> → <code>.inx</code>, <code>.wav</code>, <code>.bmp</code> and <code>.tga</code> → the game's own headers,
 written to <code>game_format</code> in the output folder. Keep the game's folder names (<code>char\monster\…</code>): an <code>.inx</code> stores a checksum of its own path.
 You can drop the whole output folder: its <code>_server</code> copy is left out.</p>
@@ -347,31 +349,33 @@ if any vertex has none). For new monster animation, key the bones in Pose Mode; 
 
 <!-- ============================================================ BACK TO GAME -->
 <h2 id="game">11. Putting your work back into the game</h2>
-<p>When the game finds an <code>.ase</code> without a matching <code>.smd</code>, it builds the <code>.smd</code> (and, for
-animated models, the <code>.smb</code>) itself when it starts.</p>
+<p>The <b>ENCODE</b> box builds the game's files from your <code>.ase</code> the way the game's own builder does.</p>
 <ol class="steps">
   <li><b>Back up</b> the original files first.</li>
   <li>Export with the <b>same name</b> as the original <code>.smd</code> (<code>fore-1.ase</code> for <code>fore-1.smd</code>,
-      <code>itWA105.ase</code> for <code>itWA105.smd</code>, <code>Tees.ase</code> for <code>Tees.smd</code>).</li>
-  <li>Copy the <code>.ase</code> and its textures into the original's game folder.</li>
-  <li>Rename or remove the old files the game should rebuild (table below), then start the game.</li>
+      <code>itWA105.ase</code> for <code>itWA105.smd</code>, <code>Tees.ase</code> for <code>Tees.smd</code>).
+      For a map, show and select the hidden collision walls too: the game needs them.</li>
+  <li>Drop the <code>.ase</code> (with its textures) on <b>ENCODE</b>, and read the <b>note</b> lines in the log.</li>
+  <li>Copy what it wrote into <code>game_format</code> over the game's files, then start the game.</li>
 </ol>
 <div class="table-wrap"><table>
-  <tr><th>Model</th><th>Remove</th><th>Keep</th></tr>
+  <tr><th>Model</th><th>ENCODE writes</th><th>The game keeps using</th></tr>
   <tr><td>Maps, map objects, weapons, items</td><td>its <code>.smd</code></td><td></td></tr>
   <tr><td>Player armour, heads, costumes</td><td>its <code>.smd</code></td><td>the class files <code>m1.smb</code> … <code>m8.smb</code></td></tr>
   <tr><td>Monster with its animation in the same file (e.g. <code>Tees</code>)</td><td>its <code>.smd</code> and <code>.smb</code></td><td>its <code>.inx</code></td></tr>
   <tr><td>Monster with a separate motion file (e.g. <code>MonGknight-model</code> + <code>mGknight</code>)</td><td>the model's <code>.smd</code></td><td>the motion <code>.smb</code> (<code>mGknight.smb</code>) and the <code>.inx</code></td></tr>
+  <tr><td>A motion file (<code>m1.ase</code> … <code>m8.ase</code>, <code>mGknight.ase</code>)</td><td>its <code>.smb</code></td><td></td></tr>
 </table></div>
 <div class="warn">
   <ul style="margin:0;padding-left:20px">
-    <li>For maps going back into the game, convert with <b>Baked vertex lighting</b> unticked, or export with
-        <b>Vertex colours</b> unticked. Otherwise the game lights them twice.</li>
-    <li>If the game shows black or missing textures, drop them on the <b>ENCODE</b> box first: it puts them into the
-        form the game's loader reads (and its notes say if the game can't read one).</li>
-    <li>For monsters with a separate motion file, the model (mesh and skin) can be changed; their animation can't be replaced yet.</li>
-    <li>The exported files have the same layout as the developers' own files, but the game's rebuild step itself can only
-        be tested in the game. Try one file first, and keep your backups.</li>
+    <li><b>Keep detail low where characters walk.</b> For walking, older clients take the faces within a few metres of
+        a character into a list of 1000 and crash when there are more (every original map stays under that). ENCODE
+        warns and says where: a 4096-face teapot is too much, a box is fine.</li>
+    <li>Delete Blender's default <b>Light</b> before exporting a map: a light without the game's <code>dynamic:</code> /
+        <code>night:</code> name is baked into the map's lighting.</li>
+    <li>A map exported from a converted map is named and lit like the original (<code>village2.ase</code> becomes
+        <code>field\ricarten\village-2.smd</code>); a model goes to the game folder its textures came from.</li>
+    <li>Try one file first, and keep your backups.</li>
   </ul>
 </div>
 

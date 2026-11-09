@@ -5,7 +5,7 @@
     <Nullable>disable</Nullable>
     <AssemblyName>PTSmd</AssemblyName>
     <RootNamespace>PTSmd</RootNamespace>
-    <Version>1.4.1</Version>
+    <Version>1.5.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Description>Priston Tale SMD reader and 3ds Max ASE writer</Description>
   </PropertyGroup>
@@ -13,6 +13,8 @@
     <!-- item / skill names in the game's index order (scripts/make_name_tables.py) -->
     <EmbeddedResource Include="..\..\smdanim\data\items.txt" LogicalName="PTSmd.data.items.txt" />
     <EmbeddedResource Include="..\..\smdanim\data\skills.txt" LogicalName="PTSmd.data.skills.txt" />
+    <!-- interface languages (Lang.cs) -->
+    <EmbeddedResource Include="lang\*.txt" LogicalName="PTSmd.lang.%(Filename).txt" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <Reference Include="System.Numerics" />

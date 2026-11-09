@@ -192,6 +192,8 @@ class Material(object):
     def pt_name(self):
         """Reconstruct a material name carrying PT's keyword flags."""
         s = ''.join(self.flags)
+        if self.use_state & 0x4000 and 10 <= self.wind_bottom <= 16:
+            s += 'BLINK_TIME%d:' % (self.wind_bottom - 8)        # (BLINK_TIME1 = 9 is the default)
         s += BLEND_NAMES.get(self.blend_type, '')
         if self.texture_type == 1 and self.anim_count:
             s = 'anim%d:%s:%d' % (self.anim_count, self.anim_pattern(), self.anim_speed_shift) + \

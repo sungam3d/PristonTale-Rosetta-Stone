@@ -1,4 +1,4 @@
-# PristonTale - Rosetta Stone: source code (v1.4.1)
+# PristonTale - Rosetta Stone: source code (v1.5.0)
 
 Everything needed to rebuild the release:
 - the converter, in C# (shipped) and in Python (reference);
@@ -68,6 +68,10 @@ The 3ds Max scripts need no build step. `PT_ASE_Importer.ms` compiles `PT_ASE_Re
 | Whole-folder output (sounds, text, model info, _server), C# (net48 and net8) vs Python | `scripts\compare_clientfiles.py` | 9486 files identical |
 | Whole client → readable → `--to-game`, vs the client's own files; C# texture decode vs Python | `scripts\roundtrip_client.py` | textures, sounds, music, text byte-identical apart from what the game can't read as shipped; .inx apart from folder-name case / old 120-byte layout |
 | Hand-made edited files (RLE / ID / grey TGAs, top-down / gapped / bitfield BMPs, waves with LIST / extensible / 18-byte fmt, UTF-16 .ini) → `--to-game`, read the way the game's loaders read | `scripts\check_to_game.py` | the game reads the right pixels and samples |
+| The developers' 2012 map `.ase` → `.smd` (`--ase2smd`), vs the game's own builds, section by section | `scripts\check_ase2smd.py` | 31/41 exact up to float steps; positions, faces, areas, lights exact (village-2 is another version) |
+| The developers' 2012 model `.ase` → `.smd` + `.smb` (`--ase2model`), object by object | `scripts\check_ase2model.py` | 337: positions, faces, UVs, keys, materials exact; 182 byte-equal (the rest: older normal form) |
+| Every client map: decode → encode → compared as geometry | `scripts\roundtrip_maps.py` (+ `check_ase2smd_geo.py`, `diag_roundtrip_map.py`) | every face, winding, colour, normal, light back; 29/61 identical |
+| Client models: decode → encode → decode | `scripts\stable_models.py` (`roundtrip_models.py` object by object) | same `.ase` apart from a merged `.smb`'s last key (1 tick) |
 | Plug-in install: 3ds Max (fresh user folder, update in place), Blender (`-c extension install-file`, scratch profile) | manual | installed and enabled |
 
 None of the game data is included; the tools read the game client's files.

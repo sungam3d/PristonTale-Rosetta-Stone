@@ -31,6 +31,7 @@ namespace PTSmd
         public bool ModelInfo = true;       // .inx -> .ini / .inf / .in
         public bool ServerCopy = true;      // <out>\_server\ CP949 model info
         public bool CopyOther;              // copy everything else unchanged
+        public int TextCodePage = 949;      // the client's text (not model info: that is 949 in every client)
         public ConvertOptions Template = new ConvertOptions();
     }
 
@@ -43,10 +44,15 @@ namespace PTSmd
         public string ServerDir, MissingReport;
         public Dictionary<string, SortedSet<string>> Missing = new Dictionary<string, SortedSet<string>>();
 
-        public string Summary() =>
-            string.Format("{0} models, {1} textures, {2} sounds, {3} text files, {4} model info files{5}{6}",
-                Models, Textures, Sounds, Texts, ModelInfos,
-                Copied > 0 ? ", " + Copied + " copied" : "", Failed > 0 ? ", " + Failed + " failed" : "");
+        public List<string> SummaryParts()
+        {
+            var o = new List<string> { L.T("kind.models", Models), L.T("kind.textures", Textures), L.T("kind.sounds", Sounds),
+                                       L.T("kind.texts", Texts), L.T("kind.infos", ModelInfos) };
+            if (Copied > 0) o.Add(L.T("kind.copied", Copied));
+            if (Failed > 0) o.Add(L.T("kind.failed", Failed));
+            return o;
+        }
+        public string Summary() => string.Join(", ", SummaryParts());
     }
 
     public static class ClientConvert
@@ -184,7 +190,7 @@ namespace PTSmd
             string server = Path.Combine(outDir, ServerFolder);
             foreach (var root in scan.Roots)
                 if (outDir.StartsWith(root.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase) || string.Equals(outDir, root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
-                    throw new ArgumentException("the output folder must not be inside the game folder (" + root + ")");
+                    throw new ArgumentException(L.T("err.out_in_game", root));
             Textures.ClearCache();
 
             var files = scan.Files;
@@ -203,7 +209,7 @@ namespace PTSmd
 
             for (int i = 0; i < files.Count; i++)
             {
-                if (cancel.IsCancellationRequested) { res.Cancelled = true; onLog?.Invoke("Cancelled.", false); break; }
+                if (cancel.IsCancellationRequested) { res.Cancelled = true; onLog?.Invoke(L.T("log.cancelled"), false); break; }
                 string f = files[i].Key, root = files[i].Value;
                 string rel = Rel(f, root);
                 string ext = Path.GetExtension(f).ToLowerInvariant();
@@ -237,7 +243,8 @@ namespace PTSmd
                             if (!s.Text) { res.Skipped++; continue; }
                             byte[] d = File.ReadAllBytes(f);
                             if (!ClientFiles.IsText(d)) { if (s.CopyOther) { Write(dst, d); res.Copied++; } continue; }
-                            Write(dst, ClientFiles.TextToUtf8(d));
+                            bool info = Array.IndexOf(ModelInfoExtensions, ext) >= 0 && IsModelFolder(rel);
+                            Write(dst, ClientFiles.TextToUtf8(d, info ? 949 : s.TextCodePage));
                             res.Texts++;
                             // model info that ships only as text (no .inx) is server data as well
                             if (s.ServerCopy && Array.IndexOf(ModelInfoExtensions, ext) >= 0 && IsModelFolder(rel))
@@ -338,10 +345,18 @@ namespace PTSmd
         // ------------------------------------------------------------------------- back to the game
         public class ToGameResult
         {
-            public int Inx, Sounds, Textures, Texts, Failed, Notes;
+            public int Inx, Sounds, Textures, Texts, Maps, Models, Failed, Notes;
             public bool Cancelled;
-            public string Summary() => string.Format("{0} .inx compiled, {1} sounds, {2} textures, {3} text files{4}{5}",
-                Inx, Sounds, Textures, Texts, Notes > 0 ? ", " + Notes + " note(s)" : "", Failed > 0 ? ", " + Failed + " failed" : "");
+            public List<string> SummaryParts()
+            {
+                var o = new List<string> { L.T("kind.inx", Inx), L.T("kind.sounds", Sounds), L.T("kind.textures", Textures), L.T("kind.texts", Texts) };
+                if (Models > 0) o.Insert(0, L.T("kind.models", Models));
+                if (Maps > 0) o.Insert(0, L.T("kind.maps", Maps));
+                if (Notes > 0) o.Add(L.T("kind.notes", Notes));
+                if (Failed > 0) o.Add(L.T("kind.failed", Failed));
+                return o;
+            }
+            public string Summary() => string.Join(", ", SummaryParts());
         }
 
         /// <summary>What ToGame works on: the files given, and every file below the folders given -
@@ -380,14 +395,15 @@ namespace PTSmd
         /// layout: 172 (current clients) or 120 (2012 clients).  onLog gets "OK ..." lines and notes
         /// (what was repaired, or what the game will not read as intended).</summary>
         public static ToGameResult ToGame(IEnumerable<string> inputs, string outDir, Action<string, bool> onLog, int layout = 172,
-                                          Action<int, int, string> onProgress = null, CancellationToken cancel = default(CancellationToken))
+                                          Action<int, int, string> onProgress = null, CancellationToken cancel = default(CancellationToken),
+                                          int textCodePage = 949)
         {
-            if (layout != 120 && layout != 172) throw new ArgumentException("the .inx layout is 172 (current clients) or 120 (2012 clients)");
+            if (layout != 120 && layout != 172) throw new ArgumentException(L.T("err.layout"));
             var r = new ToGameResult();
             var files = ToGameFiles(inputs, outDir);
             for (int i = 0; i < files.Count; i++)
             {
-                if (cancel.IsCancellationRequested) { r.Cancelled = true; onLog?.Invoke("Cancelled.", false); break; }
+                if (cancel.IsCancellationRequested) { r.Cancelled = true; onLog?.Invoke(L.T("log.cancelled"), false); break; }
                 string f = files[i];
                 string ext = Path.GetExtension(f).ToLowerInvariant();
                 string root = RootOf(f);                                  // (wav\, sky\ ... count too)
@@ -411,34 +427,49 @@ namespace PTSmd
                         Write(dst, PTSmd.Textures.ForGame(File.ReadAllBytes(f), notes));
                         r.Textures++;
                     }
+                    else if (ext == ".ase")
+                    {
+                        if (AseToSmd.LooksLikeStage(f, out string hint))
+                        {
+                            string smdRel = EncodeMap(f, rel, hint, outDir, layout, notes);
+                            r.Maps++;
+                            onLog?.Invoke("OK   " + smdRel, true);
+                        }
+                        else
+                        {
+                            foreach (string built in EncodeModel(f, rel, outDir, notes)) onLog?.Invoke("OK   " + built, true);
+                            r.Models++;
+                        }
+                    }
                     else if (IsTextExt(ext))
                     {
                         byte[] raw = File.ReadAllBytes(f);
                         if (!ClientFiles.IsText(raw)) continue;
                         if (f.EndsWith(".shipped" + ext, StringComparison.OrdinalIgnoreCase)) continue;
-                        string text = ClientFiles.ReadText(raw);
-                        byte[] cp = ClientFiles.TextToCp949(raw);
+                        // model info is in the Korean code page in every client; other text in the client's own
+                        bool info = Array.IndexOf(ModelInfoExtensions, ext) >= 0 && IsModelInfo(raw);
+                        int page = info ? 949 : textCodePage;
+                        string text = ClientFiles.ReadText(raw, page);
+                        byte[] cp = ClientFiles.TextToCp949(raw, page);
                         if (!ReferenceEquals(cp, raw))
                         {
-                            var lost = ClientFiles.Unmappable(text);
+                            var lost = ClientFiles.Unmappable(text, page);
                             if (lost.Count > 0)
-                                notes.Add("the game's Korean code page has no " + string.Join(" ", lost.Take(10).Select(c => "'" + c + "'")) +
-                                          (lost.Count > 10 ? " ..." : "") + " - written as '?'");
+                                notes.Add(L.T("note.unmappable", string.Join(" ", lost.Take(10).Select(c => "'" + c + "'")) + (lost.Count > 10 ? " ..." : "")));
                         }
                         Write(dst, cp);
                         r.Texts++;
-                        if (Array.IndexOf(ModelInfoExtensions, ext) >= 0 && IsModelInfo(raw))
+                        if (info)
                         {
                             string relInx = Path.ChangeExtension(rel, ".inx");
                             if (rel.IndexOf('\\') < 0)
-                                notes.Add("not inside the game's folders (char\\monster\\...): the .inx path checksum is made from the bare file " +
-                                          "name, so the game will not read its motions right - keep the folders when you edit");
+                                notes.Add(L.T("note.no_game_folder"));
                             Write(Path.Combine(outDir, relInx), ClientFiles.CompileIni(text, relInx, layout, null, null, notes.Add));
                             r.Inx++;
                             onLog?.Invoke("OK   " + relInx, true);
                         }
                     }
-                    foreach (var n in notes) { r.Notes++; onLog?.Invoke("note " + rel + ": " + n, false); }
+                    foreach (var n in notes) { r.Notes++; onLog?.Invoke(L.T("log.note", rel, n), false); }
                 }
                 catch (Exception e)
                 {
@@ -448,6 +479,83 @@ namespace PTSmd
             }
             onProgress?.Invoke(files.Count, files.Count, "");
             return r;
+        }
+
+        /// <summary>A map .ase -> .smd the way the game builds it (AseToSmd).  The textures are named with
+        /// the game folder the .ase sits in (rel); outside a game folder, with the folder of the map it was
+        /// decoded from (hint: our decoder and exporters name its materials "PT_village-2...").  The lighting
+        /// is the map's own (an existing .smd of the same map in the output, else the client's setting).
+        /// Returns the .smd's path below outDir.</summary>
+        static string EncodeMap(string f, string rel, string hint, string outDir, int layout, List<string> notes)
+        {
+            var o = new EncodeOptions { WideAreas = layout != 120 };
+            string name = Path.GetFileNameWithoutExtension(f);
+            string dir = Path.GetDirectoryName(rel);
+            if (string.IsNullOrEmpty(dir))
+            {
+                if (!AseToSmd.KnownMap(name, out dir, out _) && hint != null && AseToSmd.KnownMap(hint, out dir, out _))
+                {
+                    notes.Add(L.T("note.ase_named", hint + ".smd", name + ".ase"));
+                    name = hint;
+                }
+                if (string.IsNullOrEmpty(dir)) dir = AseToSmd.GameDirFromBitmaps(f);
+                if (string.IsNullOrEmpty(dir))
+                {
+                    dir = "field\\" + Path.GetFileName(Path.GetDirectoryName(Path.GetFullPath(f)));
+                    notes.Add(L.T("note.ase_folder", dir + "\\"));
+                }
+            }
+            dir = dir.TrimEnd('\\', '/');
+            o.DataDir = dir + "\\";
+            string smdRel = Path.Combine(dir, name + ".smd");
+            string dst = Path.Combine(outDir, smdRel);
+            if (!AseToSmd.ReadLighting(dst, o))
+                AseToSmd.SetLighting(o, AseToSmd.KnownMap(name, out _, out bool b160) && b160);
+            var er = AseToSmd.Stage(f, dst, o);
+            if (er.TooManyVertices) notes.Add(L.T("note.ase_vertices", er.Vertices));
+            if (er.TooManyFaces) notes.Add(L.T("note.ase_faces", er.Faces));
+            if (er.BadFaces > 0) notes.Add(L.T("note.ase_badface", er.BadFaces));
+            if (er.CrowdedFaces > AseToSmd.CrowdedLimit)
+                notes.Add(L.T("note.ase_crowded", er.CrowdedFaces, Math.Round(er.CrowdedX).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                              Math.Round(er.CrowdedY).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            return smdRel;
+        }
+
+        /// <summary>A model .ase -> .smd (+ .smb) the way the game builds it (AseToSmd.Model).  The .smb
+        /// (bones and animation) is written when the .ase has its own animated skeleton: a monster with
+        /// its animation inside, a motion file, a map prop on bones.  Armour and monsters on a shared
+        /// skeleton file (our decoder names it in *PT_SKELETON) get the .smd only: their bones just
+        /// place the skin.  Returns the files written, below outDir.</summary>
+        static List<string> EncodeModel(string f, string rel, string outDir, List<string> notes)
+        {
+            var o = new EncodeOptions();
+            string name = Path.GetFileNameWithoutExtension(f);
+            string dir = Path.GetDirectoryName(rel);
+            if (string.IsNullOrEmpty(dir))
+            {
+                dir = AseToSmd.GameDirFromBitmaps(f);
+                if (string.IsNullOrEmpty(dir))
+                {
+                    dir = Path.GetFileName(Path.GetDirectoryName(Path.GetFullPath(f)));
+                    notes.Add(L.T("note.ase_folder", dir + "\\"));
+                }
+            }
+            dir = dir.TrimEnd('\\', '/');
+            o.DataDir = dir + "\\";
+            AseToSmd.ModelParts(f, out bool bones, out bool skinned, out bool meshes);
+            string skel = AseToSmd.SkeletonName(f), smbName = null;
+            bool animated = AseToSmd.HasBoneAnimation(f);
+            if (bones && !meshes) smbName = skel ?? name + ".smb";                       // (a motion / skeleton file)
+            else if (bones && (skel == null ? animated : string.Equals(skel, name + ".smb", StringComparison.OrdinalIgnoreCase)))
+                smbName = name + ".smb";
+            var outl = new List<string>();
+            string smdRel = Path.Combine(dir, name + ".smd"), smbRel = smbName != null ? Path.Combine(dir, smbName) : null;
+            var mr = AseToSmd.Model(f, meshes ? Path.Combine(outDir, smdRel) : null, smbRel != null ? Path.Combine(outDir, smbRel) : null, o);
+            if (mr.WroteSmd) outl.Add(smdRel);
+            if (mr.WroteSmb) outl.Add(smbRel);
+            if (mr.Unassigned > 0) notes.Add(L.T("note.ase_unassigned", mr.Unassigned));
+            if (skinned && !bones) notes.Add(L.T("note.ase_nobones"));
+            return outl;
         }
 
         /// <summary>Model info text (has a *모양파일 or *동작파일 line), not some other .ini.</summary>

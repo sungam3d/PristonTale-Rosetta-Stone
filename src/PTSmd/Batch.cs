@@ -87,7 +87,7 @@ namespace PTSmd
             Converter.ClearClientCache();
             for (int i = 0; i < files.Count; i++)
             {
-                if (cancel.IsCancellationRequested) { res.Cancelled = true; onLog?.Invoke("Cancelled.", false); break; }
+                if (cancel.IsCancellationRequested) { res.Cancelled = true; onLog?.Invoke(L.T("log.cancelled"), false); break; }
                 string f = files[i];
                 onStart?.Invoke(i, f);
                 string rel = Path.GetFileName(f);
@@ -117,13 +117,13 @@ namespace PTSmd
                     onLog?.Invoke(string.Format("OK   {0,-6} {1,-46} {2,7} verts {3,7} faces {4,4} mats  {5:0.0}s",
                         sc.Kind, rel, sc.VertexCount, sc.FaceCount, sc.Materials.Count, ft.Elapsed.TotalSeconds), true);
                     if (sc.Kind == "stage" && sc.Objects.Count > 2)
-                        onLog?.Invoke(string.Format("     split into {0} objects", sc.Objects.Count), true);
+                        onLog?.Invoke("     " + L.T("log.split", sc.Objects.Count), true);
                     if (sc.Skeleton != null)
-                        onLog?.Invoke(string.Format("     skeleton {0}, {1} motions{2}{3}", sc.SkeletonFile, sc.Motions.Count,
-                                      sc.AnimFile.Length > 0 ? ", animation in " + sc.AnimFile : "",
-                                      sc.MissingBones ? "  (" + sc.MissingBoneNames.Count + " bones missing)" : ""), true);
+                        onLog?.Invoke("     " + L.T("log.skeleton", sc.SkeletonFile, sc.Motions.Count,
+                                      sc.AnimFile.Length > 0 ? L.T("log.anim_in", sc.AnimFile) : "",
+                                      sc.MissingBones ? L.T("log.bones_missing", sc.MissingBoneNames.Count) : ""), true);
                     else if (sc.MissingBones)
-                        onLog?.Invoke("     NO SKELETON FOUND - copy its .smb (and .inx) next to the .smd", false);
+                        onLog?.Invoke("     " + L.T("log.no_skeleton"), false);
                 }
                 catch (Exception e)
                 {

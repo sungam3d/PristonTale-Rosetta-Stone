@@ -31,7 +31,9 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
 from bpy.types import Operator, OperatorFileListElement
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
-from . import ase_anim, ase_export, ase_import
+from bpy.app.translations import pgettext_rpt as rpt_
+
+from . import ase_anim, ase_export, ase_import, translations
 
 # files + options handed from the file-browser operator to the progress runner
 _pending = []
@@ -120,7 +122,7 @@ class IMPORT_SCENE_OT_pt_ase(Operator, ImportHelper):
             paths = [self.filepath]
         paths = [p for p in paths if os.path.isfile(p)]
         if not paths:
-            self.report({'ERROR'}, "No .ase file selected")
+            self.report({'ERROR'}, rpt_("No .ase file selected"))
             return {'CANCELLED'}
         opts = ase_import.ImportOptions(
             scale=self.scale, mode=self.mode, vertex_colors=self.vertex_colors,
@@ -189,21 +191,21 @@ class IMPORT_SCENE_OT_pt_ase_run(Operator):
             except Exception as e:  # never fail the import over the view
                 print('[PT import] could not frame view:', e)
         missing = sorted(set(m for r in self.results for m in r['missing']))
-        msg = "Imported %d file(s), %d objects in %.1f s" % (len(self.results), len(visible), time.time() - self.t0)
+        msg = rpt_("Imported %d file(s), %d objects in %.1f s") % (len(self.results), len(visible), time.time() - self.t0)
         rigs = [r['armature'] for r in self.results if r.get('armature')]
         if rigs:
-            msg += "; skeleton with %d bones - motions are in the sidebar (N) > PT tab" % self.results[-1]['bones']
+            msg += rpt_("; skeleton with %d bones - motions are in the sidebar (N) > PT tab") % self.results[-1]['bones']
             try:
                 context.view_layer.objects.active = rigs[-1]
             except Exception:
                 pass
         no_anim = sorted(set(r['missing_animation'] for r in self.results if r.get('missing_animation')))
         if no_anim:
-            msg += "; no animation found (%s) - imported in T-pose. Put it next to the .ase or pick it under Animation file" % ", ".join(os.path.basename(n) for n in no_anim)
+            msg += rpt_("; no animation found (%s) - imported in T-pose. Put it next to the .ase or pick it under Animation file") % ", ".join(os.path.basename(n) for n in no_anim)
         if self.cancelled:
-            msg += " (cancelled)"
+            msg += rpt_(" (cancelled)")
         if missing:
-            msg += "; %d texture(s) not found (see console)" % len(missing)
+            msg += rpt_("; %d texture(s) not found (see console)") % len(missing)
             print("[PT import] missing textures:")
             for m in missing:
                 print("   ", m)
@@ -266,7 +268,7 @@ class IMPORT_SCENE_OT_pt_ase_run(Operator):
             return {'FINISHED'}
         except Exception as e:
             self._finish(context)
-            self.report({'ERROR'}, "PT ASE import failed: %s" % e)
+            self.report({'ERROR'}, rpt_("PT ASE import failed: %s") % e)
             import traceback
             traceback.print_exc()
             return {'CANCELLED'}
@@ -331,12 +333,12 @@ class EXPORT_SCENE_OT_pt_ase(Operator, ExportHelper):
         except RuntimeError as e:
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
-        msg = "Exported %d object(s), %d faces, %d texture(s) in %.1f s -> %s" % (
+        msg = rpt_("Exported %d object(s), %d faces, %d texture(s) in %.1f s -> %s") % (
             r['objects'], r['faces'], r['textures'], r['seconds'], os.path.basename(self.filepath))
         if r.get('bones'):
-            msg += "; %d bones%s" % (r['bones'], ", with animation" if r.get('animated') else ", no animation")
+            msg += rpt_("; %d bones%s") % (r['bones'], rpt_(", with animation") if r.get('animated') else rpt_(", no animation"))
         if r.get('unassigned'):
-            msg += "; %d vertices have no bone (give them a vertex group)" % r['unassigned']
+            msg += rpt_("; %d vertices have no bone (give them a vertex group)") % r['unassigned']
         self.report({'WARNING'} if r.get('unassigned') else {'INFO'}, msg)
         return {'FINISHED'}
 
@@ -353,6 +355,7 @@ _classes = (IMPORT_SCENE_OT_pt_ase, IMPORT_SCENE_OT_pt_ase_run, EXPORT_SCENE_OT_
 
 
 def register():
+    translations.register()
     ase_anim.register()
     for c in _classes:
         bpy.utils.register_class(c)
@@ -366,3 +369,4 @@ def unregister():
     for c in reversed(_classes):
         bpy.utils.unregister_class(c)
     ase_anim.unregister()
+    translations.unregister()

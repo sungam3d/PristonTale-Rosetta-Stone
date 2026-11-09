@@ -775,7 +775,8 @@ class PT_UL_motions(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
         row.label(text=item.name, icon='ACTION')
-        row.label(text='%d - %d%s' % (item.start, item.end, '  loop' if item.loop else ''))
+        row.label(text='%d - %d%s' % (item.start, item.end, bpy.app.translations.pgettext_iface('  loop') if item.loop else ''),
+                  translate=False)
 
 
 class PT_OT_all_motions(bpy.types.Operator):

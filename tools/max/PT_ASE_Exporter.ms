@@ -45,6 +45,8 @@ struct PTASE_Writer
     ss = undefined,
     fn fl v = (formattedPrint (v as float) format:".6f"),
     fn p3 v = ((fl v.x) + "\t" + (fl v.y) + "\t" + (fl v.z)),
+    -- material colours: 8 decimals, so the game gets the very float it had (Rosetta Stone ENCODE)
+    fn c3 v = ((formattedPrint (v.x as float) format:".8f") + "\t" + (formattedPrint (v.y as float) format:".8f") + "\t" + (formattedPrint (v.z as float) format:".8f")),
     fn q s = ("\"" + (substituteString (s as string) "\"" "'") + "\"")
 )
 
@@ -100,15 +102,15 @@ fn PTASE_WriteStd ss mat ind tag idx =
         local dc = color 150 150 150
         try (dc = mat.diffuse) catch ()
         format "%*MATERIAL_NAME %\n%*MATERIAL_CLASS \"Standard\"\n" i2 (w.q nm) i2 to:ss
-        format "%*MATERIAL_DIFFUSE %\n" i2 (w.p3 ((dc as point3) / 255.0)) to:ss
+        format "%*MATERIAL_DIFFUSE %\n" i2 (w.c3 ((dc as point3) / 255.0)) to:ss
         format "%}\n" ind to:ss
         return ok
     )
     local d = (mat.diffuse as point3) / 255.0
     format "%*MATERIAL_NAME %\n" i2 (w.q mat.name) to:ss
     format "%*MATERIAL_CLASS \"Standard\"\n" i2 to:ss
-    format "%*MATERIAL_AMBIENT %\n" i2 (w.p3 ((mat.ambient as point3) / 255.0)) to:ss
-    format "%*MATERIAL_DIFFUSE %\n" i2 (w.p3 d) to:ss
+    format "%*MATERIAL_AMBIENT %\n" i2 (w.c3 ((mat.ambient as point3) / 255.0)) to:ss
+    format "%*MATERIAL_DIFFUSE %\n" i2 (w.c3 d) to:ss
     format "%*MATERIAL_SPECULAR %\n" i2 (w.p3 ((mat.specular as point3) / 255.0)) to:ss
     format "%*MATERIAL_SHINE %\n%*MATERIAL_SHINESTRENGTH %\n" i2 (w.fl (mat.glossiness / 100.0)) i2 (w.fl (mat.specularLevel / 100.0)) to:ss
     format "%*MATERIAL_TRANSPARENCY %\n" i2 (w.fl (1.0 - mat.opacity / 100.0)) to:ss
@@ -495,7 +497,8 @@ fn PTASE_WriteLight ss node =
     format "\t}\n}\n" to:ss
 )
 
-fn PTASE_Export path nodes:undefined copyTextures:true skeleton:true anim:#auto =
+-- includeHidden: also hidden objects (a map's collision walls sit on a hidden layer and the game needs them)
+fn PTASE_Export path nodes:undefined copyTextures:true skeleton:true anim:#auto includeHidden:false =
 (
     PTASE_TexOutDir = if copyTextures then getFilenamePath path else undefined
     PTASE_TexCopied = Dictionary #string
@@ -503,7 +506,7 @@ fn PTASE_Export path nodes:undefined copyTextures:true skeleton:true anim:#auto 
     -- the C# helpers: bones, keys, the game's texture names
     local helpers = try (PTASE_Compile()) catch (false)
     if nodes == undefined do nodes = if selection.count > 0 then (selection as array) else (objects as array)
-    local geoms = for n in nodes where (superclassof n == GeometryClass and canConvertTo n TriMeshGeometry and not n.isHidden) collect n
+    local geoms = for n in nodes where (superclassof n == GeometryClass and canConvertTo n TriMeshGeometry and (includeHidden or not n.isHidden)) collect n
     local lights = for n in nodes where (superclassof n == Light and classof n == Omnilight) collect n
     -- characters / monsters: skinned meshes and their skeletons (selecting a PT bone exports its skinned meshes too)
     local skinned = #(), bones = #()
@@ -511,7 +514,7 @@ fn PTASE_Export path nodes:undefined copyTextures:true skeleton:true anim:#auto 
     (
         local selRigs = #()
         for n in nodes do (local r = getUserProp n "pt_rig"; if r != undefined and r != "" do appendIfUnique selRigs (r as string))
-        for o in objects where (PTASE_SkinOf o) != undefined and not o.isHidden do
+        for o in objects where (PTASE_SkinOf o) != undefined and (includeHidden or not o.isHidden) do
         (
             local inSel = (findItem geoms o) > 0
             if not inSel and selRigs.count > 0 do
@@ -570,7 +573,7 @@ fn PTASE_Export path nodes:undefined copyTextures:true skeleton:true anim:#auto 
     local animated = if bones.count > 0 then PTASE_WriteBones ss bones anim:anim else 0
     if bones.count > 0 do
         format "PT ASE export: % bones (% animated), % skinned meshes%\n" bones.count animated skinned.count \
-            (if unassigned > 0 then (", " + unassigned as string + " vertices without a bone") else "")
+            (if unassigned > 0 then (substituteString ", {1} vertices without a bone" "{1}" (unassigned as string)) else "")
     for l in lights do PTASE_WriteLight ss l
     local sw = dotNetObject "System.IO.StreamWriter" path false ((dotNetClass "System.Text.Encoding").GetEncoding 1252)
     sw.NewLine = "\r\n"

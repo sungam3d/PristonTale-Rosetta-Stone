@@ -25,7 +25,7 @@ namespace PTSmd
         public bool SplitObjects = true;        // maps: one object per original part (false = one mesh)
         public bool CompactMaterials = true;
         public bool VertexColors = true;
-        public bool ClampColors = true;
+        public bool ClampColors = false;        // (true: cap at 1.0 - the lamps' glow is lost on the way back)
         public double ColorScale = 1.0;
         public bool IncludeBones = false;       // (unused since characters always get their skeleton)
         public bool IncludeLights = true;
@@ -48,6 +48,7 @@ namespace PTSmd
         public List<(int t, double[] axis, double ang)> RotKeys = new List<(int, double[], double)>();
         public List<(int t, double x, double y, double z)> ScaleKeys = new List<(int, double, double, double)>();
         public bool IsBone;                    // skeleton bone (written as a helper)
+        public int[,] ExactTm;                 // the game's stored Tm (rows written exactly from it)
         public string[] Physique;              // per-vertex bone name (skinned meshes)
         public GeomObject(string name) { Name = name; }
     }
@@ -58,6 +59,8 @@ namespace PTSmd
         public List<Material> Materials = new List<Material>();
         public List<GeomObject> Objects = new List<GeomObject>();
         public List<Light> Lights = new List<Light>();
+        internal HashSet<string> OpacityTex;
+        internal List<Material> AllMaterials;          // (also the unused ones: they share texture records too)
         public int LastFrame = 100;
         public Dictionary<string, string> TexturePaths = new Dictionary<string, string>();
         public List<string> MissingBoneNames = new List<string>();
@@ -700,6 +703,7 @@ namespace PTSmd
             var used = new HashSet<int>(st.Faces.Where(f => f.Mat < nmat).Select(f => f.Mat));
             var mr = MaterialRemap(st.Materials, used, opt.CompactMaterials);
             sc.Materials = mr.order;
+            sc.AllMaterials = st.Materials;
             int nLayers = st.MaxLayers();
 
             double[][] colors = null;
@@ -712,7 +716,7 @@ namespace PTSmd
                     var c = new double[3];
                     for (int k = 0; k < 3; k++)
                     {
-                        double v = st.Colors[i * 4 + k] * opt.ColorScale / 255.0;
+                        double v = st.Colors[i * 4 + 2 - k] * opt.ColorScale / 255.0;     // (stored B, G, R, A)
                         if (opt.ClampColors) v = Math.Min(1.0, Math.Max(0.0, v));
                         c[k] = v;
                     }
@@ -802,6 +806,24 @@ namespace PTSmd
             return (Inv3(ti), t);
         }
 
+        static int[,] ExactTmOf(ModelObject o) => SaneTm(o.TmInv) && SaneTm(o.Tm) ? o.Tm : null;
+
+        /// <summary>TM_SCALE for exact rows: the proportions of the row lengths, with an average of 256 -
+        /// the game divides the rows by that average (smOBJ3D::ReformTM) and gets the stored Tm back.</summary>
+        static int[] ExactScale(int[,] tm)
+        {
+            var len = new double[3];
+            for (int r = 0; r < 3; r++)
+                len[r] = Math.Sqrt((double)((long)tm[r, 0] * tm[r, 0] + (long)tm[r, 1] * tm[r, 1] + (long)tm[r, 2] * tm[r, 2]));
+            double total = len[0] + len[1] + len[2];
+            var s = new int[3];
+            for (int r = 0; r < 3; r++) s[r] = total > 0 ? (int)Math.Floor(len[r] * 768.0 / total + 0.5) : 256;
+            int sum = s[0] + s[1] + s[2];
+            if (sum < 768) s[0] += 768 - sum;
+            if (sum > 770) s[0] -= sum - 770;
+            return s;
+        }
+
         /// <summary>A real 8.8 fixed-point smMATRIX: last column 0 0 0 256, sensible size, not flat.</summary>
         static bool SaneTm(int[,] m)
         {
@@ -838,7 +860,7 @@ namespace PTSmd
         static GeomObject BoneObject(ModelObject b, bool keys, ModelObject parent = null, int end = 0)
         {
             var w = ModelWorld(b);
-            var go = new GeomObject(b.Name) { Parent = b.Parent, Rows = w.rows, Pos = w.t, IsBone = true };
+            var go = new GeomObject(b.Name) { Parent = b.Parent, Rows = w.rows, Pos = w.t, IsBone = true, ExactTm = ExactTmOf(b) };
             if (b.Faces.Length > 0)
             {
                 // the bone's own Biped shape, when the .smb still has it
@@ -924,6 +946,7 @@ namespace PTSmd
             foreach (var o in meshes) foreach (var f in o.Faces) if (f.Mat < nmat) used.Add(f.Mat);
             var mr = MaterialRemap(md.Materials, used, opt.CompactMaterials);
             sc.Materials = mr.order;
+            sc.AllMaterials = md.Materials;
 
             if (skel != null)
             {
@@ -941,7 +964,7 @@ namespace PTSmd
                 var go = new GeomObject(o.Name)
                 {
                     Parent = bones.ContainsKey(o.Parent) || meshNames.Contains(o.Parent) ? o.Parent : "",
-                    Rows = w.rows, Pos = w.t,
+                    Rows = w.rows, Pos = w.t, ExactTm = ExactTmOf(o),
                 };
                 int nv = o.LocalVerts.Length / 3;
                 for (int i = 0; i < nv; i++)
@@ -1158,6 +1181,23 @@ namespace PTSmd
             w.L(ind + "}");
         }
 
+        static string ALow(string s)
+        {
+            var c = s.ToCharArray();
+            for (int i = 0; i < c.Length; i++) if (c[i] >= 'A' && c[i] <= 'Z') c[i] = (char)(c[i] + 32);
+            return new string(c);
+        }
+
+        static HashSet<string> OpacityTextures(Scene sc)
+        {
+            if (sc.OpacityTex == null)
+            {
+                sc.OpacityTex = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var mm in sc.AllMaterials ?? sc.Materials) if (mm.MapOpacity != 0 && mm.Textures.Count > 0) sc.OpacityTex.Add(ALow(mm.Textures[0].name));
+            }
+            return sc.OpacityTex;
+        }
+
         static void WriteMaterial(W w, Scene sc, int idx, Material m, string ind)
         {
             string name = m.PtName();
@@ -1167,16 +1207,16 @@ namespace PTSmd
             var d = m.Diffuse;
             w.L(i2 + "*MATERIAL_NAME " + Q(name));
             w.L(i2 + "*MATERIAL_CLASS \"Standard\"");
-            w.L(i2 + "*MATERIAL_AMBIENT " + F4(d[0]) + "\t" + F4(d[1]) + "\t" + F4(d[2]));
-            w.L(i2 + "*MATERIAL_DIFFUSE " + F4(d[0]) + "\t" + F4(d[1]) + "\t" + F4(d[2]));
+            w.L(i2 + "*MATERIAL_AMBIENT " + F(d[0]) + "\t" + F(d[1]) + "\t" + F(d[2]));       // (exact: the
+            w.L(i2 + "*MATERIAL_DIFFUSE " + F(d[0]) + "\t" + F(d[1]) + "\t" + F(d[2]));       //  encoder rebuilds them)
             w.L(i2 + "*MATERIAL_SPECULAR 0.9000\t0.9000\t0.9000");
             w.L(i2 + "*MATERIAL_SHINE 0.1000");
             w.L(i2 + "*MATERIAL_SHINESTRENGTH 0.0000");
-            w.L(i2 + "*MATERIAL_TRANSPARENCY " + F4(m.Transparency));
+            w.L(i2 + "*MATERIAL_TRANSPARENCY " + F(m.Transparency));
             w.L(i2 + "*MATERIAL_WIRESIZE 1.0000");
             w.L(i2 + "*MATERIAL_SHADING Blinn");
             w.L(i2 + "*MATERIAL_XP_FALLOFF 0.0000");
-            w.L(i2 + "*MATERIAL_SELFILLUM " + F4(m.SelfIllum));
+            w.L(i2 + "*MATERIAL_SELFILLUM " + F(m.SelfIllum));
             if (m.TwoSided != 0) w.L(i2 + "*MATERIAL_TWOSIDED");
             w.L(i2 + "*MATERIAL_FALLOFF In");
             w.L(i2 + "*MATERIAL_XP_TYPE " + (m.BlendType == 4 || m.BlendType == 5 ? "Additive" : "Filter"));
@@ -1205,7 +1245,9 @@ namespace PTSmd
             if (layers.Count > 0)
             {
                 var l0 = layers[0];
-                if (m.MapOpacity != 0 || l0.nameA.Length > 0)
+                // an alpha name without an opacity map comes from another material sharing the texture
+                // (the game keeps one record per texture): only the material with the map writes it
+                if (m.MapOpacity != 0 || (l0.nameA.Length > 0 && !OpacityTextures(sc).Contains(ALow(l0.name))))
                 {
                     string op = l0.nameA.Length > 0 ? l0.nameA : l0.name;
                     WriteMap(w, i2, "*MAP_OPACITY", "Map #" + (m.Index * 8 + 7).ToString(CI), 6, Tp(sc, op), 1);
@@ -1218,19 +1260,30 @@ namespace PTSmd
         {
             w.L(ind + "*NODE_TM {");
             string i2 = ind + "\t";
-            var aa = RowsToAxisAngle(go.Rows);
+            var rows = go.Rows;
+            Func<double, string> fr = F4;
+            int[] es = null;
+            if (go.ExactTm != null)                    // (models: exact, so that ENCODE gives the same Tm back)
+            {
+                rows = new double[3][];
+                for (int r = 0; r < 3; r++) rows[r] = new[] { go.ExactTm[r, 0] / 256.0, go.ExactTm[r, 1] / 256.0, go.ExactTm[r, 2] / 256.0 };
+                fr = F;
+                es = ExactScale(go.ExactTm);
+            }
+            var aa = RowsToAxisAngle(rows);
             w.L(i2 + "*NODE_NAME " + Q(go.Name));
             w.L(i2 + "*INHERIT_POS 0 0 0");
             w.L(i2 + "*INHERIT_ROT 0 0 0");
             w.L(i2 + "*INHERIT_SCL 0 0 0");
             for (int r = 0; r < 3; r++)
-                w.L(i2 + "*TM_ROW" + r + " " + F4(go.Rows[r][0]) + "\t" + F4(go.Rows[r][1]) + "\t" + F4(go.Rows[r][2]));
+                w.L(i2 + "*TM_ROW" + r + " " + fr(rows[r][0]) + "\t" + fr(rows[r][1]) + "\t" + fr(rows[r][2]));
             var p = go.Pos;
             w.L(i2 + "*TM_ROW3 " + F(p[0]) + "\t" + F(p[1]) + "\t" + F(p[2]));
             w.L(i2 + "*TM_POS " + F(p[0]) + "\t" + F(p[1]) + "\t" + F(p[2]));
             w.L(i2 + "*TM_ROTAXIS " + F4(aa.axis[0]) + "\t" + F4(aa.axis[1]) + "\t" + F4(aa.axis[2]));
             w.L(i2 + "*TM_ROTANGLE " + F4(aa.ang));
-            w.L(i2 + "*TM_SCALE " + F4(aa.scale[0]) + "\t" + F4(aa.scale[1]) + "\t" + F4(aa.scale[2]));
+            if (es != null) w.L(i2 + "*TM_SCALE " + F(es[0] / 256.0) + "\t" + F(es[1] / 256.0) + "\t" + F(es[2] / 256.0));
+            else w.L(i2 + "*TM_SCALE " + F4(aa.scale[0]) + "\t" + F4(aa.scale[1]) + "\t" + F4(aa.scale[2]));
             w.L(i2 + "*TM_SCALEAXIS 0.0000\t0.0000\t0.0000");
             w.L(i2 + "*TM_SCALEAXISANG 0.0000");
             w.L(ind + "}");

@@ -68,6 +68,23 @@ namespace PTSmd
             }
         }
         static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
+        static readonly Dictionary<int, Encoding> pages = new Dictionary<int, Encoding>(), strictPages = new Dictionary<int, Encoding>();
+        /// <summary>A code page (949 = CP above), replacing what it cannot map, or (strict) throwing.</summary>
+        public static Encoding Page(int codePage, bool strict = false)
+        {
+            if (codePage == 949) return strict ? StrictCP : CP;
+            var d = strict ? strictPages : pages;
+            lock (d)
+            {
+                if (!d.TryGetValue(codePage, out var e))
+                {
+                    var unused = CP;                                // (registers the code pages on .NET 8)
+                    d[codePage] = e = strict ? Encoding.GetEncoding(codePage, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback)
+                                             : Encoding.GetEncoding(codePage, new EncoderReplacementFallback("?"), new DecoderReplacementFallback("\uFFFD"));
+                }
+                return e;
+            }
+        }
         static Encoding strictCp;
         /// <summary>Code page 949 that throws on bytes it cannot map.</summary>
         static Encoding StrictCP
@@ -133,7 +150,7 @@ namespace PTSmd
         {
             if (data.Length < 20 || !(Starts(data, "RIFF") || Starts(data, "JODO")) || Encoding.ASCII.GetString(data, 8, 4) != "WAVE")
             {
-                notes.Add("not a .wav file the game can play");
+                notes.Add(PTSmd.L.T("wav.not_wav"));
                 return data;
             }
             int fmtAt = -1, fmtLen = 0, dataAt = -1, dataLen = 0;
@@ -149,19 +166,18 @@ namespace PTSmd
                 {
                     dataAt = (int)p + 8;
                     dataLen = (int)Math.Min(len, avail);
-                    if (len > avail) notes.Add("the sound data is cut short");
+                    if (len > avail) notes.Add(PTSmd.L.T("wav.cut"));
                 }
                 p += 8 + len + (len & 1);
             }
-            if (fmtAt < 0 || fmtLen < 16 || dataAt < 0) { notes.Add("damaged .wav (no fmt or data chunk)"); return data; }
+            if (fmtAt < 0 || fmtLen < 16 || dataAt < 0) { notes.Add(PTSmd.L.T("wav.damaged")); return data; }
             int tag = data[fmtAt] | data[fmtAt + 1] << 8, bits = data[fmtAt + 14] | data[fmtAt + 15] << 8;
             bool extensible = tag == 0xFFFE && fmtLen >= 40;
             if (extensible) tag = data[fmtAt + 24] | data[fmtAt + 25] << 8;          // the sub-format
             if (tag != 1)
-                notes.Add((tag == 3 ? "32-bit float sound" : "not PCM sound (format " + tag + ")") +
-                          ": the game plays it as noise - export it as 16-bit PCM");
+                notes.Add(tag == 3 ? PTSmd.L.T("wav.float") : PTSmd.L.T("wav.not_pcm", tag));
             else if (bits != 8 && bits != 16)
-                notes.Add(bits + "-bit sound: the game plays 8 and 16-bit sound - export it as 16-bit PCM");
+                notes.Add(PTSmd.L.T("wav.bits", bits));
             bool asIs = fmtAt == 20 && !extensible &&
                         ((fmtLen == 16 && ids.Count == 2) ||                                                    // fmt, data
                          (fmtLen == 16 && ids.Count == 3 && ids[1] == "fact" && U32(data, 40) == 4) ||        // fmt, fact, data
@@ -181,8 +197,7 @@ namespace PTSmd
                 o[36] = (byte)'d'; o[37] = (byte)'a'; o[38] = (byte)'t'; o[39] = (byte)'a';
                 Put(o, 40, dataLen);
                 Buffer.BlockCopy(data, dataAt, o, 44, dataLen);
-                notes.Add("sound header rewritten to the plain layout the game reads (" +
-                          string.Join(", ", ids.Where(i => i != "data").Select(i => i.Trim())) + " -> fmt, data)");
+                notes.Add(PTSmd.L.T("wav.rewritten", string.Join(", ", ids.Where(i => i != "data").Select(i => i.Trim()))));
             }
             for (int i = 0; i < 4; i++) o[i] = (byte)magic[i];
             return o;
@@ -208,14 +223,15 @@ namespace PTSmd
 
         /// <summary>The characters of s the game's code page (949) has no place for: they would be
         /// written as '?'.</summary>
-        public static List<string> Unmappable(string s)
+        public static List<string> Unmappable(string s, int codePage = 949)
         {
             var bad = new List<string>();
-            if (CP.GetString(CP.GetBytes(s)) == s) return bad;
+            var cpg = Page(codePage);
+            if (cpg.GetString(cpg.GetBytes(s)) == s) return bad;
             for (int i = 0; i < s.Length; i++)
             {
                 string ch = char.IsSurrogatePair(s, i) ? s.Substring(i++, 2) : s[i].ToString();
-                try { StrictCP.GetBytes(ch); }
+                try { Page(codePage, true).GetBytes(ch); }
                 catch (ArgumentException) { if (!bad.Contains(ch)) bad.Add(ch); }
             }
             return bad;
@@ -223,12 +239,12 @@ namespace PTSmd
 
         /// <summary>CP949 text -> UTF-8 with a BOM (so Notepad and editors pick the right code page).
         /// Plain ASCII, text that already is UTF-8 and bytes that are not clean CP949 stay as they are.</summary>
-        public static byte[] TextToUtf8(byte[] data)
+        public static byte[] TextToUtf8(byte[] data, int codePage = 949)
         {
             if (HasBom(data) || data.All(b => b < 0x80)) return data;
             try { StrictUtf8.GetString(data); return data; } catch (ArgumentException) { }
             string s;
-            try { s = StrictCP.GetString(data); } catch (ArgumentException) { return data; }
+            try { s = Page(codePage, true).GetString(data); } catch (ArgumentException) { return data; }
             var body = Encoding.UTF8.GetBytes(s);
             var o = new byte[body.Length + 3];
             o[0] = 0xEF; o[1] = 0xBB; o[2] = 0xBF;
@@ -237,22 +253,22 @@ namespace PTSmd
         }
 
         /// <summary>UTF-8 (with a BOM, or valid UTF-8 with Korean in it) -> CP949 text the game reads.</summary>
-        public static byte[] TextToCp949(byte[] data)
+        public static byte[] TextToCp949(byte[] data, int codePage = 949)
         {
             var u16 = Utf16(data);
-            if (u16 != null) return CP.GetBytes(u16);
-            if (HasBom(data)) return CP.GetBytes(Encoding.UTF8.GetString(data, 3, data.Length - 3));
+            if (u16 != null) return Page(codePage).GetBytes(u16);
+            if (HasBom(data)) return Page(codePage).GetBytes(Encoding.UTF8.GetString(data, 3, data.Length - 3));
             if (data.All(b => b < 0x80)) return data;
-            try { return CP.GetBytes(StrictUtf8.GetString(data)); } catch (ArgumentException) { return data; }
+            try { return Page(codePage).GetBytes(StrictUtf8.GetString(data)); } catch (ArgumentException) { return data; }
         }
 
         /// <summary>Text bytes as a string: UTF-8 when marked or valid, CP949 otherwise.</summary>
-        public static string ReadText(byte[] data)
+        public static string ReadText(byte[] data, int codePage = 949)
         {
             var u16 = Utf16(data);
             if (u16 != null) return u16;
             if (HasBom(data)) return Encoding.UTF8.GetString(data, 3, data.Length - 3);
-            try { return StrictUtf8.GetString(data); } catch (ArgumentException) { return CP.GetString(data); }
+            try { return StrictUtf8.GetString(data); } catch (ArgumentException) { return Page(codePage).GetString(data); }
         }
 
         static string CStr(byte[] b, int o, int max)
@@ -703,7 +719,7 @@ namespace PTSmd
         {
             SourceTables();
             int lineNo = 0;
-            void Warn(string msg) => warn?.Invoke("line " + lineNo + ": " + msg);
+            void Warn(string msg) => warn?.Invoke(PTSmd.L.T("ini.line", lineNo, msg));
             // (what follows // on a line is a comment for the reader; the game reads it as more names)
             IEnumerable<string> Named(List<string> a) => a.TakeWhile(t => !t.StartsWith("//"));
             var itemIndex = new Dictionary<string, int>();
@@ -733,7 +749,7 @@ namespace PTSmd
                     if (head.StartsWith("*") && head.Contains("동작"))
                     {
                         if (args.Any(t => t.StartsWith("//")))
-                            Warn(head + ": the game reads text after the frames as a key letter ('/' here) - put comments on a line of their own");
+                            Warn(PTSmd.L.T("ini.comment", head));
                         if (mi.Motions.Count < MOTION_MAX)
                         {
                             var m = new Motion();
@@ -768,9 +784,9 @@ namespace PTSmd
                         }
                     }
                     else if (head.StartsWith("*") && head.Contains("표정"))
-                        Warn(head + " comes before any *동작모음 / *표정모음 - the game skips it");
+                        Warn(PTSmd.L.T("ini.face_early", head));
                     else if (head.StartsWith("*") && head != "*끝")
-                        Warn(head + " is not a model info command - the game skips the line");
+                        Warn(PTSmd.L.T("ini.unknown_cmd", head));
                     continue;
                 }
                 switch (cmd)
@@ -818,7 +834,7 @@ namespace PTSmd
                         }
                         foreach (var tok in Named(args).TakeWhile(t => t != "모두"))
                             if (tok != "없음" && !itemIndex.ContainsKey(tok) && !IsHashNumber(tok))
-                                Warn("*착용무기: no item is called '" + tok + "' - the game leaves it out");
+                                Warn(PTSmd.L.T("ini.no_item", tok));
                         break;
                     }
                     case 12:
@@ -831,7 +847,7 @@ namespace PTSmd
                                 if (string.Equals(tok.ToLowerInvariant(), j.name.ToLowerInvariant(), StringComparison.Ordinal)) { m.Jobs |= j.bit; break; }
                         foreach (var tok in Named(args))
                             if (!JobBits.Any(j => string.Equals(tok, j.name, StringComparison.OrdinalIgnoreCase)))
-                                Warn("*적용직업: no class is called '" + tok + "' (" + string.Join(", ", JobBits.Select(j => j.name)) + ") - the game leaves it out");
+                                Warn(PTSmd.L.T("ini.no_class", tok, string.Join(", ", JobBits.Select(j => j.name))));
                         break;
                     }
                     case 13:
@@ -839,7 +855,7 @@ namespace PTSmd
                         var m = mi.Motions[last];
                         int v = 0;
                         foreach (var tok in Named(args))
-                            if (tok != "마을" && tok != "필드") Warn("*해당위치: '" + tok + "' is neither 마을 (town) nor 필드 (field)");
+                            if (tok != "마을" && tok != "필드") Warn(PTSmd.L.T("ini.no_place", tok));
                         foreach (var tok in args.Take(2)) v |= tok == "마을" ? 1 : tok == "필드" ? 2 : 0;
                         if (v == 0 || m.State == 0x150) v = 3;
                         m.MapPos = v;
@@ -860,9 +876,9 @@ namespace PTSmd
                             m.Skills[k] = 0;
                             foreach (var tok in Named(args))
                                 if (!skillIndex.ContainsKey(tok.ToLowerInvariant()) && !IsHashNumber(tok))
-                                    Warn("*적용기술: no skill is called '" + tok + "' - the game leaves it out");
+                                    Warn(PTSmd.L.T("ini.no_skill", tok));
                         }
-                        else Warn("*적용기술 belongs to a skill motion (*기술동작...) - the game ignores it here");
+                        else Warn(PTSmd.L.T("ini.skill_motion"));
                         break;
                     }
                     case 15: mi.TalkLink = folder + StringArg(rest); break;

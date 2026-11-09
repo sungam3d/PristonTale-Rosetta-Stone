@@ -1,4 +1,4 @@
-PristonTale - Rosetta Stone  v1.4.1
+PristonTale - Rosetta Stone  v1.5.0
 ===================================
 
 Turns Priston Tale game files (.smd) into .ase files for 3ds Max and Blender:
@@ -27,9 +27,11 @@ QUICK START
      .inx (monster/NPC/player model info) -> the .ini/.inf/.in it was built from
      _server\  the model info again in the game's Korean code page (for the server)
    The ENCODE box (right) does the reverse for edited files:
+     .ase maps and models -> .smd (+ .smb), built the way the game builds them,
      .ini/.inf/.in -> .inx, .wav/.bmp/.tga -> the game's headers, in the layout the
      game's loaders read (RLE TGAs unpacked etc.). Read the "note" lines in the log:
-     they name what the game would not read as you meant (unknown weapon names ...).
+     they name what the game would not read as you meant (unknown weapon names ...,
+   too many faces in one spot of a map: older clients crash near more than 1000).
    Keep the game's folder names (char\monster\...): the .inx stores a checksum of its path.
 
 2. Plug-ins: the window lists 3ds Max and Blender found on this PC, with an
@@ -37,9 +39,11 @@ QUICK START
 
 2a. 3ds Max 2020+
    Copy the 4 files from 3dsMax\ into  <3ds Max>\scripts\startup\  and restart Max.
-   Customize > Customize User Interface > Toolbars > Category "PT Tools":
-   drag "PT ASE Import" and "PT Motions" onto a toolbar.
-   Characters come in skinned and animated; the PT Motions list plays one motion.
+   Menu "Priston Tale" > Import... / Export... / Motions...  (also File > Import / Export).
+   Import: click what you have (map as in the game, map for editing, character
+   animated / T-pose / mesh only, or an animation such as m1.smb onto the character
+   in the scene); .smd / .smb open directly when installed from PT_RosettaStone.exe.
+   Export: selected objects or everything, hidden collision walls included.
 
 2b. Blender 4.2+
    Edit > Preferences > Get Extensions > last v (top right) > Install from Disk...

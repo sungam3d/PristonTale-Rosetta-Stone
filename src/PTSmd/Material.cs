@@ -33,7 +33,7 @@ namespace PTSmd
         };
 
         public int Index;
-        public int InUse, TexCount, MapOpacity, TextureType, BlendType, TwoSided, UseState, MeshState;
+        public int InUse, TexCount, MapOpacity, TextureType, BlendType, TwoSided, UseState, MeshState, WindBottom;
         public int[] StageState = new int[8], FormState = new int[8];
         public double[] Diffuse = new double[3];
         public double Transparency, SelfIllum;
@@ -61,6 +61,7 @@ namespace PTSmd
             SelfIllum = Bin.F(b, o + 148);
             UseState = Bin.I(b, o + 164);
             MeshState = Bin.I(b, o + 168);
+            WindBottom = Bin.I(b, o + 172);
             AnimCount = Bin.I(b, o + 304);
             AnimFrameMask = Bin.I(b, o + 308);
             AnimSpeedShift = Bin.I(b, o + 312);
@@ -159,6 +160,8 @@ namespace PTSmd
         public string PtName()
         {
             string s = string.Concat(Flags);
+            if ((UseState & 0x4000) != 0 && WindBottom >= 10 && WindBottom <= 16)
+                s += "BLINK_TIME" + (WindBottom - 8).ToString(System.Globalization.CultureInfo.InvariantCulture) + ":";   // (BLINK_TIME1 = 9 is the default)
             if (BlendNames.TryGetValue(BlendType, out string bn)) s += bn;
             if (TextureType == 1 && AnimCount != 0)
                 s = string.Format("anim{0}:{1}:{2}", AnimCount, AnimPattern(), AnimSpeedShift) + (s.Length > 0 ? ":" + s : "");

@@ -10,12 +10,13 @@
         opacity (TGA alpha / mask), two-sided, additive blending
       * PT collision walls go to a hidden, non-renderable layer
       * optional omni lights
-    Export: PT_ASE_Exporter.ms ("Export selected as ASE..."): meshes, materials, bones, skin,
-    animation and moving props, as the game's own builder reads them.
+    Export: PT_ASE_Exporter.ms (its own window): meshes, materials, bones, skin, animation and
+    moving props, as the game's own builder reads them.
 
-    Install : copy PT_ASE_Importer.ms, PT_ASE_Exporter.ms, PT_ASE_Reader.cs + PT_ASE_Skin.cs
-              into <3ds Max>\scripts\startup\   (or run via Scripting > Run Script)
-              then Customize > Toolbars/Menus > Category "PT Tools" > "PT ASE Import"
+    Install : PT_RosettaStone.exe (3ds Max plug-in), or copy PT_ASE_Importer.ms, PT_ASE_Exporter.ms,
+              PT_ASE_Reader.cs + PT_ASE_Skin.cs into <3ds Max>\scripts\startup\
+    Use     : menu Priston Tale > Import... / Export... / Motions...  (also File > Import / Export,
+              and the macros under Customize > Category "PT Tools")
     Script  : PTASE_ImportFiles #(@"C:\path\map.ase")   -- progress bar + zoom to result
               PTASE_ImportFile @"C:\path\map.ase"        -- one file, no zoom (for batch use)
 */
@@ -333,7 +334,7 @@ fn PTASE_Animate sc bones =
     for i = 0 to rig.Count - 1 while not PTASE_Cancelled do
     (
         local n = rig.BoneKeyCount i
-        if n == 0 do continue
+        if n == 0 or bones[i + 1] == undefined do continue        -- (animation only: a bone the scene lacks)
         PTASE_KeyNode sc bones[i + 1] (rig.PosKeys i) (rig.RotKeys i) (rig.ScaleKeys i)
         -- no scale keys: the game applies no scale, so a mirrored bind pose (omuD's Bip-13) does
         -- not mirror the animated bone
@@ -346,7 +347,7 @@ fn PTASE_Animate sc bones =
     (
         local s = rig.BoneStatic (i - 1)
         local b = bones[i]
-        if s != "" do at time 0 b.transform = (if b.parent != undefined then (execute s) * b.parent.transform else execute s)
+        if s != "" and b != undefined do at time 0 b.transform = (if b.parent != undefined then (execute s) * b.parent.transform else execute s)
     )
     total
 )
@@ -398,6 +399,14 @@ rollout PTASE_MotionRollout "PT Motions" width:280
     )
     on btnAll pressed do (animationRange = interval 0 PTASE_LastFrame; sliderTime = 0)
     on btnPlay pressed do (if isAnimPlaying() then stopAnimation() else playAnimation immediateReturn:true)
+)
+
+-- "text {1} {2}" with the values filled in (the texts are translated as whole sentences by the
+-- Rosetta Stone installer, which writes this script in the window's language)
+fn PTASE_Fill s args =
+(
+    for i = 1 to args.count do s = substituteString s ("{" + i as string + "}") (args[i] as string)
+    s
 )
 
 fn PTASE_ShowMotions =
@@ -539,8 +548,8 @@ fn PTASE_ImportFiles files opts:PTASE_Opts zoom:true =
         for i = 1 to files.count while not PTASE_Cancelled do
         (
             local nm = getFilenameFile files[i]
-            progressStart (if files.count == 1 then ("Importing " + nm + "...")
-                           else ("Importing " + nm + "  (" + i as string + " of " + files.count as string + ")..."))
+            progressStart (if files.count == 1 then (PTASE_Fill "Importing {1}..." #(nm))
+                           else (PTASE_Fill "Importing {1}  ({2} of {3})..." #(nm, i, files.count)))
             PTASE_ProgLo = 0.0
             PTASE_ProgHi = 100.0
             join all (PTASE_ImportFile files[i] opts:opts)
@@ -552,7 +561,7 @@ fn PTASE_ImportFiles files opts:PTASE_Opts zoom:true =
     (
         PTASE_ProgOn = false
         progressEnd()
-        messageBox ("PT ASE import failed:\n" + getCurrentException()) title:"PT ASE Importer"
+        messageBox (PTASE_Fill "PT ASE import failed:\n{1}" #(getCurrentException())) title:"PT ASE Importer"
     )
     PTASE_ProgOn = false
     local vis = for n in all where isValidNode n and not n.isHidden and n.renderable collect n
@@ -565,17 +574,15 @@ fn PTASE_ImportFiles files opts:PTASE_Opts zoom:true =
     )
     completeRedraw()
     local secs = (timestamp() - t) / 1000.0
-    local msg = "PT ASE: imported " + done as string + " file(s), " + vis.count as string + " objects in " + \
-                (formattedPrint secs format:".1f") + " s" + (if PTASE_Cancelled then "  (cancelled)" else "")
+    local msg = (PTASE_Fill "PT ASE: imported {1} file(s), {2} objects in {3} s" #(done, vis.count, formattedPrint secs format:".1f")) + \
+                (if PTASE_Cancelled then "  (cancelled)" else "")
     displayTempPrompt msg 6000
     format "%\n" msg
     if PTASE_AnimMissing.count > 0 and not (GetQuietMode()) do
     (
         local names = ""
         for n in PTASE_AnimMissing do names += "    " + n + "\n"
-        messageBox ("No animation found, so the character was imported in T-pose.\n\nLooked for:\n" + names + \
-                    "\nPut that file next to the .ase (convert any armour of the same class with " + \
-                    "PT_SMD2ASE.exe into that folder), or pick it under 'Animation file'.") title:"PT ASE Importer"
+        messageBox (PTASE_Fill "No animation found, so the character was imported in T-pose.\n\nLooked for:\n{1}\nPut that file next to the .ase (convert any armour of the same class with PT_RosettaStone.exe into that folder), or pick it under 'Animation file'." #(names)) title:"PT ASE Importer"
     )
     all
 )
@@ -610,7 +617,86 @@ fn PTASE_FindAse dir =
     files
 )
 
-rollout PTASE_Rollout "PT ASE Importer" width:300
+-- ------------------------------------------------------------------ game files (.smd / .smb)
+-- PT_RosettaStone's installer writes PT_ASE_Config.ms next to these scripts with the path of its
+-- converter (smd2ase.exe), so game files open directly: they are converted to .ase first, with
+-- their textures decoded, into %TEMP%\PT_RosettaStone.
+global PTASE_Converter
+if doesFileExist (PTASE_Dir + "PT_ASE_Config.ms") do try (fileIn (PTASE_Dir + "PT_ASE_Config.ms")) catch ()
+
+fn PTASE_ToAse path =
+(
+    local ext = toLower (getFilenameType path)
+    if ext == ".ase" do return path
+    if PTASE_Converter == undefined or not doesFileExist PTASE_Converter do
+    (
+        messageBox (PTASE_Fill "{1} is a game file. Convert it to .ase with PT_RosettaStone.exe first, or install the plug-in again from PT_RosettaStone.exe so that it can open game files itself." #(filenameFromPath path)) title:"PT ASE Importer"
+        return undefined
+    )
+    local out = pathConfig.appendPath (getDir #temp) ("PT_RosettaStone\\" + getFilenameFile path)
+    makeDir out all:true
+    local code = 0
+    hiddenDOSCommand ("\"\"" + PTASE_Converter + "\" \"" + path + "\" -o \"" + out + "\" --textures\"") exitCode:&code
+    local want = toLower (getFilenameFile path) + ".ase"
+    for f in (PTASE_FindAse out) where toLower (filenameFromPath f) == want do return f
+    messageBox (PTASE_Fill "Could not convert {1}." #(filenameFromPath path)) title:"PT ASE Importer"
+    undefined
+)
+
+-- ------------------------------------------------------------------ animation only
+-- Puts the animation of a motion file (a class's m1.smb ... m8.smb, a monster's motion .ase) on
+-- the character already in the scene: its bones are found by name, their old keys replaced.
+fn PTASE_ApplyAnimation path =
+(
+    if not PTASE_Compile() do return 0
+    local sc = PTASE_Asm.CreateInstance "PTAse.Scene"
+    sc.Animate = true
+    sc.LoadFile path
+    local nm = filenameFromPath path
+    if not sc.HasRig do (messageBox (PTASE_Fill "{1} has no bones or animation." #(nm)) title:"PT ASE Importer"; return 0)
+    local rig = sc.Rig
+    local bones = #()
+    local found = 0
+    for i = 0 to rig.Count - 1 do
+    (
+        local n = getNodeByName (rig.BoneName i) exact:true ignoreCase:true
+        bones[i + 1] = n
+        if n != undefined do found += 1
+    )
+    if found == 0 do
+    (
+        messageBox "None of the animation's bones is in the scene.\nImport the character first (Character / monster - T-pose, with bones), then its animation." title:"PT ASE Importer"
+        return 0
+    )
+    with redraw off
+    (
+        undo "PT animation" on
+        (
+            for b in bones where b != undefined do
+            (
+                b.position.controller = Linear_Position()
+                b.rotation.controller = Linear_Rotation()
+                b.scale.controller = Linear_Scale()
+                setUserProp b "pt_anim" nm
+            )
+            PTASE_Animate sc bones
+            PTASE_SetMotions sc
+        )
+    )
+    completeRedraw()
+    local msg = PTASE_Fill "PT ASE: animation of {1} put on {2} of {3} bones" #(nm, found, rig.Count)
+    displayTempPrompt msg 6000
+    format "%\n" msg
+    found
+)
+
+-- ------------------------------------------------------------------ the import window
+-- One choice sets everything up; "Advanced options" (closed) holds the single settings.
+global PTASE_Floater, PTASE_AdvRollout, PTASE_ExportRollout
+global PTASE_Preset = if PTASE_Preset == undefined then 1 else PTASE_Preset
+global PTASE_ExpOpts = if PTASE_ExpOpts == undefined then #(1, true, 1, true) else PTASE_ExpOpts   -- which, copy textures, animation, hidden
+
+rollout PTASE_AdvRollout "Advanced options" width:320
 (
     group "Shading"
     (
@@ -630,21 +716,8 @@ rollout PTASE_Rollout "PT ASE Importer" width:300
     (
         checkbox chkRig "Skeleton + skin" checked:true
         radiobuttons rdoPose "Pose:" labels:#("Animated", "T-pose (bind pose)") default:1 align:#left
-        edittext edtAnim "Animation file (optional, e.g. m8_motions.ase):" labelOnTop:true
+        edittext edtAnim "Animation file (optional, e.g. m8.ase):" labelOnTop:true
         button btnAnim "Browse..." width:80 align:#right
-    )
-    button btnFiles "Import ASE file(s)..." width:260 height:28
-    button btnFolder "Import all ASE in a folder..." width:260
-    button btnExport "Export selected as ASE..." width:260
-    checkbox chkCopyTex "Copy textures next to the exported .ase" checked:true
-    dropdownlist ddAnim "Characters: export animation" items:#("Auto (monsters yes, player armour no)", "Always", "Never") width:260
-    label lblStatus "Tip: the window closes and Max zooms to the map" align:#left
-
-    fn opts =
-    (
-        #((if rdoMode.state == 1 then #game else #lit), chkVC.checked, chkLM.checked,
-          chkColl.checked, chkLights.checked, spnScale.value, edtTex.text, true, chkRig.checked,
-          (if rdoPose.state == 1 then #animated else #tpose), edtAnim.text)
     )
     fn updatePose =
     (
@@ -653,39 +726,99 @@ rollout PTASE_Rollout "PT ASE Importer" width:300
         edtAnim.enabled = act
         btnAnim.enabled = act
     )
-    on chkRig changed s do updatePose()
-    on rdoPose changed s do updatePose()
-    on btnAnim pressed do
+    fn opts =
     (
-        local f = getOpenFileName caption:"Animation file (converted *_motions.ase)" types:"ASCII Scene Export (*.ase)|*.ase|All files (*.*)|*.*"
-        if f != undefined do edtAnim.text = f
+        #((if rdoMode.state == 1 then #game else #lit), chkVC.checked, chkLM.checked,
+          chkColl.checked, chkLights.checked, spnScale.value, edtTex.text, true, chkRig.checked,
+          (if rdoPose.state == 1 then #animated else #tpose), edtAnim.text)
     )
-    -- Close the dialog, then import with a progress bar and zoom to the result.
-    fn runMany files =
+    fn show o =
     (
-        if files.count == 0 do (messageBox "No .ase files found." title:"PT ASE Importer"; return ok)
-        if files.count > 10 and not (queryBox (files.count as string + " .ase files will be imported.\n" + \
-                "This may take a while (about 2-4 seconds per map).\n\nContinue?") title:"PT ASE Importer") do return ok
-        PTASE_Opts = opts()
-        destroyDialog PTASE_Rollout
-        PTASE_ImportFiles files opts:PTASE_Opts
-        if PTASE_Motions.count > 0 and files.count == 1 do PTASE_ShowMotions()
-    )
-    on PTASE_Rollout open do
-    (
-        -- restore the options used last time
-        local o = PTASE_Opts
         rdoMode.state = if o[1] == #lit then 2 else 1
         chkVC.checked = o[2]; chkLM.checked = o[3]; chkColl.checked = o[4]; chkLights.checked = o[5]
         spnScale.value = o[6]; edtTex.text = o[7]; chkRig.checked = o[9]
         rdoPose.state = if o[10] == #tpose then 2 else 1; edtAnim.text = o[11]; updatePose()
     )
+    on chkRig changed s do updatePose()
+    on rdoPose changed s do updatePose()
     on btnTex pressed do (local d = getSavePath caption:"Texture folder"; if d != undefined do edtTex.text = d)
+    on btnAnim pressed do
+    (
+        local f = getOpenFileName caption:"Animation file (converted .ase, or the game's .smb)" types:"Priston Tale (*.ase;*.smb)|*.ase;*.smb|All files (*.*)|*.*"
+        if f != undefined do edtAnim.text = f
+    )
+    on PTASE_AdvRollout open do show PTASE_Opts
+)
+
+rollout PTASE_Rollout "Priston Tale - Import" width:320
+(
+    label lblWhat "What are you importing?" align:#left
+    radiobuttons rdoWhat labels:#("Map - as seen in the game", "Map - for editing and exporting", "Character / monster - animated", "Character / monster - T-pose, with bones", "Character / monster - mesh only, no bones", "Animation only - onto the character in the scene") columns:1 align:#left default:1
+    label lblHint "" align:#left width:296 height:42
+    button btnFiles "Import file(s)..." width:296 height:30
+    button btnFolder "Import a whole folder..." width:296
+    label lblFiles "Opens .ase files, and game files (.smd, .smb) directly." align:#left
+
+    local hints = #("The map with its textures and baked lighting, as the game shows it. Collision walls are hidden.",
+                    "Everything you need to change the map and export it again: collision walls visible on their own layer, lights included.",
+                    "Skeleton, skin and animation (a monster's own; armour uses its class file, e.g. m1.smb, found next to it).",
+                    "Skeleton and skin in the bind pose, without animation - the pose to edit the model in.",
+                    "Just the mesh, without a skeleton (weapons and items have none anyway).",
+                    "Replaces the animation of the character in the scene with this file's (a class file m1.smb ... m8.smb, or a monster's).")
+
+    -- the settings each choice stands for (#(shading, vertex light, layers, hide collision, lights, rig, pose))
+    fn presetOpts i =
+    (
+        local o = deepCopy PTASE_Opts
+        case i of
+        (
+            1: (o[1] = #game; o[2] = true; o[3] = true; o[4] = true; o[5] = false; o[9] = true; o[10] = #animated)
+            2: (o[1] = #game; o[2] = true; o[3] = true; o[4] = false; o[5] = true; o[9] = true; o[10] = #animated)
+            3: (o[9] = true; o[10] = #animated)
+            4: (o[9] = true; o[10] = #tpose)
+            5: (o[9] = false)
+        )
+        o
+    )
+    fn choose i =
+    (
+        PTASE_Preset = i
+        lblHint.text = hints[i]
+        btnFolder.enabled = i != 6
+        -- the choice's settings; the Advanced panel shows them once it is open (it opens after this
+        -- panel, and its controls cannot be set before)
+        if i != 6 do
+        (
+            PTASE_Opts = presetOpts i
+            try (PTASE_AdvRollout.show PTASE_Opts) catch ()     -- (also while the panel is rolled up)
+        )
+    )
+    on rdoWhat changed i do choose i
+    on PTASE_Rollout open do (rdoWhat.state = PTASE_Preset; choose PTASE_Preset)
+
+    -- Close the window, then import with a progress bar and zoom to the result.
+    fn runMany files =
+    (
+        if files.count == 0 do (messageBox "No .ase files found." title:"PT ASE Importer"; return ok)
+        if files.count > 10 and not (queryBox (PTASE_Fill "{1} .ase files will be imported.\nThis may take a while (about 2-4 seconds per map).\n\nContinue?" #(files.count)) title:"PT ASE Importer") do return ok
+        try (PTASE_Opts = PTASE_AdvRollout.opts()) catch ()
+        local preset = rdoWhat.state
+        try (closeRolloutFloater PTASE_Floater) catch ()
+        local ase = for f in files collect PTASE_ToAse f
+        ase = for f in ase where f != undefined collect f
+        if ase.count == 0 do return ok
+        if preset == 6 then (for f in ase do PTASE_ApplyAnimation f; PTASE_ShowMotions())
+        else
+        (
+            PTASE_ImportFiles ase opts:PTASE_Opts
+            if PTASE_Motions.count > 0 and ase.count == 1 do PTASE_ShowMotions()
+        )
+    )
     on btnFiles pressed do
     (
         local dlg = dotNetObject "System.Windows.Forms.OpenFileDialog"
-        dlg.Filter = "ASCII Scene Export (*.ase)|*.ase|All files (*.*)|*.*"
-        dlg.Multiselect = true
+        dlg.Filter = "Priston Tale (*.ase;*.smd;*.smb)|*.ase;*.smd;*.smb|All files (*.*)|*.*"
+        dlg.Multiselect = rdoWhat.state != 6
         dlg.Title = "Import ASE"
         if PTASE_LastDir != undefined and doesFileExist PTASE_LastDir do dlg.InitialDirectory = PTASE_LastDir
         if (dlg.ShowDialog()).ToString() == "OK" do
@@ -705,21 +838,58 @@ rollout PTASE_Rollout "PT ASE Importer" width:300
             runMany (PTASE_FindAse d)
         )
     )
+)
+
+fn PTASE_OpenImport =
+(
+    try (closeRolloutFloater PTASE_Floater) catch ()
+    PTASE_Floater = newRolloutFloater "Priston Tale - Import" 340 600
+    addRollout PTASE_Rollout PTASE_Floater
+    addRollout PTASE_AdvRollout PTASE_Floater rolledUp:true
+)
+
+-- ------------------------------------------------------------------ the export window
+rollout PTASE_ExportRollout "Priston Tale - Export" width:320
+(
+    radiobuttons rdoWhich "Export:" labels:#("Selected objects", "Everything in the scene") columns:1 align:#left
+    checkbox chkHidden "Include hidden objects (a map's collision walls)" checked:true
+    checkbox chkCopyTex "Copy textures next to the exported .ase" checked:true
+    dropdownlist ddAnim "Characters: export animation" items:#("Auto (monsters yes, player armour no)", "Always", "Never") width:296
+    button btnExport "Export ASE..." width:296 height:30
+    label lblNext "Then drop the .ase on ENCODE in PT_RosettaStone.exe: it builds the game's .smd (and .smb)." align:#left width:296 height:30
+
+    on PTASE_ExportRollout open do
+    (
+        local o = PTASE_ExpOpts
+        rdoWhich.state = o[1]; chkCopyTex.checked = o[2]; ddAnim.selection = o[3]; chkHidden.checked = o[4]
+    )
     on btnExport pressed do
     (
+        local nodes = if rdoWhich.state == 1 then (selection as array) else (objects as array)
+        if nodes.count == 0 do (messageBox "Nothing selected: select the objects to export, or choose 'Everything in the scene'." title:"PT ASE Export"; return ok)
         local f = getSaveFileName caption:"Export ASE" types:"ASCII Scene Export (*.ase)|*.ase"
-        if f != undefined do
-        (
-            PTASE_ExportSelected f copyTextures:chkCopyTex.checked anim:(#(#auto, #always, #never))[ddAnim.selection]
-            displayTempPrompt ("PT ASE: exported to " + f) 6000
-        )
+        if f == undefined do return ok
+        PTASE_ExpOpts = #(rdoWhich.state, chkCopyTex.checked, ddAnim.selection, chkHidden.checked)
+        try (destroyDialog PTASE_ExportRollout) catch ()
+        PTASE_Export f nodes:nodes copyTextures:PTASE_ExpOpts[2] anim:(#(#auto, #always, #never))[PTASE_ExpOpts[3]] includeHidden:PTASE_ExpOpts[4]
+        displayTempPrompt (PTASE_Fill "PT ASE: exported to {1}" #(f)) 6000
     )
+)
+
+fn PTASE_OpenExport =
+(
+    try (destroyDialog PTASE_ExportRollout) catch ()
+    createDialog PTASE_ExportRollout
 )
 
 macroScript PTASE_Import category:"PT Tools" buttonText:"PT ASE Import" tooltip:"Priston Tale ASE importer"
 (
-    try (destroyDialog PTASE_Rollout) catch ()
-    createDialog PTASE_Rollout
+    PTASE_OpenImport()
+)
+
+macroScript PTASE_ExportMacro category:"PT Tools" buttonText:"PT ASE Export" tooltip:"Priston Tale ASE exporter"
+(
+    PTASE_OpenExport()
 )
 
 macroScript PTASE_Motions category:"PT Tools" buttonText:"PT Motions" tooltip:"Priston Tale motion list (walk, attack ...)"
@@ -727,9 +897,53 @@ macroScript PTASE_Motions category:"PT Tools" buttonText:"PT Motions" tooltip:"P
     PTASE_ShowMotions()
 )
 
--- Show the dialog when the script is run directly (not from startup / batch)
-if not (matchPattern PTASE_Dir pattern:"*startup*") and not (GetQuietMode()) do
+-- ------------------------------------------------------------------ menus
+-- A "Priston Tale" menu in the main menu bar, and the importer / exporter under File > Import and
+-- File > Export (3ds Max 2020-2024 menus; newer versions keep the macros under PT Tools).
+fn PTASE_AddItem menu macro title =
 (
-    try (destroyDialog PTASE_Rollout) catch ()
-    try (createDialog PTASE_Rollout) catch ()
+    for i = 1 to menu.numItems() do if (menu.getItem i).getTitle() == title do return false
+    local it = menuMan.createActionItem macro "PT Tools"
+    it.setTitle title
+    it.setUseCustomTitle true
+    menu.addItem it -1
+    true
 )
+
+fn PTASE_InstallMenus =
+(
+    try
+    (
+        local main = menuMan.getMainMenuBar()
+        local pt = menuMan.findMenu "Priston Tale"
+        if pt == undefined do
+        (
+            pt = menuMan.createMenu "Priston Tale"
+            local sub = menuMan.createSubMenuItem "Priston Tale" pt
+            main.addItem sub (main.numItems() + 1)
+        )
+        PTASE_AddItem pt "PTASE_Import" "Import..."
+        PTASE_AddItem pt "PTASE_ExportMacro" "Export..."
+        PTASE_AddItem pt "PTASE_Motions" "Motions..."
+        -- File > Import / File > Export
+        local file = menuMan.findMenu "&File"
+        if file != undefined do
+            for i = 1 to file.numItems() do
+            (
+                local it = file.getItem i
+                local sm = it.getSubMenu()
+                if sm == undefined do continue
+                local t = it.getTitle()
+                if matchPattern t pattern:"*Import*" do PTASE_AddItem sm "PTASE_Import" "Priston Tale (.ase, .smd, .smb)..."
+                if matchPattern t pattern:"*Export*" do PTASE_AddItem sm "PTASE_ExportMacro" "Priston Tale (.ase)..."
+            )
+        menuMan.updateMenuBar()
+    )
+    catch (format "PT ASE: menus not added (%)\n" (getCurrentException()))
+)
+
+if not (GetQuietMode()) do PTASE_InstallMenus()
+
+-- Show the import window when the script is run directly (not from startup / batch)
+if not (matchPattern PTASE_Dir pattern:"*startup*") and not (GetQuietMode()) do
+    try (PTASE_OpenImport()) catch ()

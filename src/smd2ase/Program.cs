@@ -23,7 +23,8 @@ usage: smd2ase <file.smd | file.smb | folder> [...] [options]
   --drop-collision        omit collision faces entirely
   --all-material-slots    keep every SMD material slot (MTLID == SMD index)
   --no-vertex-colors      do not write baked lighting colours
-  --no-clamp-colors       allow overbright (>1.0) vertex colours
+  --clamp-colors          cap vertex colours at 1.0 (default: keep the overbright
+                          lighting near lamps, so the map comes back as it was)
   --color-scale X         multiply baked colours (default 1.0)
   --animation MODE        characters/monsters: auto (default), embed, shared or none
                           auto = monsters get their animation inside the .ase, player
@@ -102,6 +103,7 @@ examples:
                         case "--all-material-slots": t.CompactMaterials = false; break;
                         case "--no-vertex-colors": t.VertexColors = false; break;
                         case "--no-clamp-colors": t.ClampColors = false; break;
+                        case "--clamp-colors": t.ClampColors = true; break;
                         case "--color-scale": t.ColorScale = double.Parse(args[++i], CultureInfo.InvariantCulture); break;
                         case "--bones": break;                                  // (old option: skeletons are automatic now)
                         case "--animation": t.Animation = args[++i].ToLowerInvariant(); break;
@@ -111,6 +113,41 @@ examples:
                         {
                             var r0 = Textures.EncodeFolder(args[++i], Console.WriteLine);
                             Console.WriteLine("encoded {0} texture(s), {1} skipped (already encoded / not BMP or TGA)", r0.encoded, r0.skipped);
+                            return 0;
+                        }
+                        case "--ase2model":                                       // in.ase out.smd|- out.smb|- [datadir] [own|game]
+                        {
+                            var eo = new EncodeOptions();
+                            string ain = args[++i], aout = args[++i], bout = args[++i];
+                            if (i + 1 < args.Length && !args[i + 1].StartsWith("-") && args[i + 1] != "own" && args[i + 1] != "game") eo.DataDir = args[++i];
+                            if (i + 1 < args.Length && (args[i + 1] == "own" || args[i + 1] == "game")) eo.OwnFile = args[++i] == "own";
+                            if (i + 1 < args.Length && args[i + 1] == "oldnormals") { eo.OldNormals = true; i++; }
+                            var mr = AseToSmd.Model(ain, aout == "-" ? null : aout, bout == "-" ? null : bout, eo);
+                            Console.WriteLine("{0} objects, {1} bones, {2} vertices, {3} faces, {4} materials, skinned={5}, smd={6}, smb={7}, unassigned={8}",
+                                mr.Objects, mr.Bones, mr.Vertices, mr.Faces, mr.Materials, mr.Skinned, mr.WroteSmd, mr.WroteSmb, mr.Unassigned);
+                            return 0;
+                        }
+                        case "--ase2smd":                                         // in.ase out.smd [datadir] [own|game] [contrast bright lx ly lz]
+                        {
+                            var eo = new EncodeOptions();
+                            string ain = args[++i], aout = args[++i];
+                            if (i + 1 < args.Length && !args[i + 1].StartsWith("-") && args[i + 1] != "own" && args[i + 1] != "game") eo.DataDir = args[++i];
+                            if (i + 1 < args.Length && (args[i + 1] == "own" || args[i + 1] == "game")) eo.OwnFile = args[++i] == "own";
+                            if (i + 5 < args.Length && int.TryParse(args[i + 1], out int ct))
+                            {
+                                eo.Contrast = ct; eo.Bright = int.Parse(args[i + 2]); eo.LightX = int.Parse(args[i + 3]);
+                                eo.LightY = int.Parse(args[i + 4]); eo.LightZ = int.Parse(args[i + 5]); i += 5;
+                            }
+                            if (i + 1 < args.Length && args[i + 1] == "single") { eo.SinglePrecision = true; i++; }
+                            if (i + 1 < args.Length && args[i + 1] == "2012") { eo.WideAreas = false; i++; }
+                            var er = AseToSmd.Stage(ain, aout, eo);
+                            Console.WriteLine("{0}: {1} objects ({2} skipped), {3} vertices, {4} faces, {5} texlinks, {6} materials, {7} textures, {8} lights ({9} dynamic), own={10}",
+                                Path.GetFileName(aout), er.Objects, er.Skipped, er.Vertices, er.Faces, er.TexLinks, er.Materials, er.Textures, er.Lights, er.DynLights, er.OwnFile);
+                            if (er.BadFaces > 0) Console.WriteLine("  note: {0} face corner(s) pointed past their object's vertices", er.BadFaces);
+                            if (er.TooManyVertices) Console.WriteLine("  note: more than 65535 vertices - the game cannot number them");
+                            if (er.TooManyFaces) Console.WriteLine("  note: more than 65535 faces - a 2012 client cannot number them");
+                            if (er.CrowdedFaces > AseToSmd.CrowdedLimit)
+                                Console.WriteLine("  note: {0} faces within reach of one spot (x {1:0}, y {2:0}): 2012-based clients crash there (limit 1000)", er.CrowdedFaces, er.CrowdedX, er.CrowdedY);
                             return 0;
                         }
                         default:

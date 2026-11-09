@@ -110,6 +110,7 @@ class GeomObject(object):
         self.name = name
         self.parent = ''
         self.rows = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        self.exact_tm = None                 # the game's stored Tm (rows written exactly from it)
         self.pos = (0.0, 0.0, 0.0)
         self.verts = []            # world positions (Max axes)
         self.faces = []            # (a, b, c, sub-material index)
@@ -150,7 +151,7 @@ class Options(object):
         self.split_objects = True      # maps: one object per original part (False = one mesh)
         self.compact_materials = True
         self.vertex_colors = True
-        self.clamp_colors = True
+        self.clamp_colors = False      # (True: cap at 1.0 - the lamps' glow is lost on the way back)
         self.color_scale = 1.0
         self.animation = 'auto'        # auto | embed | shared | none
         self.lod = 'high'              # high | all  (monster detail levels)
@@ -247,12 +248,13 @@ def build_stage_scene(path, opt):
 
     used = set(f[3] for f in st.faces if f[3] < nmat)
     sc.materials, remap = _material_remap(mats, used, opt.compact_materials)
+    sc.all_materials = mats
 
     nlayers = st.max_layers()
     colors = None
     if opt.vertex_colors:
         colors = []
-        for (r, g, b, a) in st.colors:
+        for (b, g, r, a) in st.colors:             # (stored B, G, R, A)
             c = [v * opt.color_scale / 255.0 for v in (r, g, b)]
             if opt.clamp_colors:
                 c = [min(1.0, max(0.0, v)) for v in c]
@@ -418,6 +420,24 @@ def _model_world(o):
         # uses it for a skinned mesh (every vertex rides on its bone): plain pivot
         return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], t
     return _inv3(ti), t
+
+
+def _exact_tm_of(o):
+    return o.tm if _sane_tm(o.tminv) and _sane_tm(o.tm) else None
+
+
+def _exact_scale(tm):
+    """TM_SCALE for exact rows: the proportions of the row lengths, with an average of 256 - the
+    game divides the rows by that average (smOBJ3D::ReformTM) and gets the stored Tm back."""
+    ln = [math.sqrt(float(tm[r][0] * tm[r][0] + tm[r][1] * tm[r][1] + tm[r][2] * tm[r][2])) for r in range(3)]
+    total = ln[0] + ln[1] + ln[2]
+    s = [int(math.floor(ln[r] * 768.0 / total + 0.5)) if total > 0 else 256 for r in range(3)]
+    n = s[0] + s[1] + s[2]
+    if n < 768:
+        s[0] += 768 - n
+    if n > 770:
+        s[0] -= n - 770
+    return s
 
 
 def _sane_tm(m):
@@ -695,6 +715,7 @@ def _bone_object(b, keys=True, parent=None, end=0):
     go.kind = 'bone'
     go.parent = b.parent
     go.rows, go.pos = _model_world(b)
+    go.exact_tm = _exact_tm_of(b)
     if b.faces:
         # the bone's own Biped shape, when the .smb still has it
         go.verts = [_xform(v, go.rows, go.pos) for v in b.local_verts]
@@ -789,6 +810,7 @@ def build_model_scene(path, opt):
             if f[3] < nmat:
                 used.add(f[3])
     sc.materials, remap = _material_remap(mats, used, opt.compact_materials)
+    sc.all_materials = mats
 
     if skel is not None:
         by_name = {b.name: b for b in skel.objects}
@@ -802,6 +824,7 @@ def build_model_scene(path, opt):
         go = GeomObject(o.name)
         go.parent = o.parent if (o.parent in bones or any(m.name == o.parent for m in meshes)) else ''
         go.rows, go.pos = rows, t
+        go.exact_tm = _exact_tm_of(o)
         if o.physique:
             go.verts = [_xform(lv, *bones.get(bn, (rows, t))) for lv, bn in zip(o.local_verts, o.physique)]
             go.physique = list(o.physique)
@@ -974,6 +997,17 @@ def _write_map(w, ind, tag, map_name, subno, bitmap, channel):
     w('%s}' % ind)
 
 
+def _alow(s):
+    return ''.join(chr(ord(c) + 32) if 'A' <= c <= 'Z' else c for c in s)
+
+
+def _opacity_textures(sc):
+    t = getattr(sc, '_opacity_tex', None)
+    if t is None:
+        t = sc._opacity_tex = set(_alow(mm.textures[0][0]) for mm in (getattr(sc, 'all_materials', None) or sc.materials) if mm.map_opacity and mm.textures)
+    return t
+
+
 def _write_material(w, sc, idx, m, ind):
     tp = sc.texture_paths
     name = m.pt_name() or ('%d - Default' % (m.index + 1))
@@ -982,16 +1016,16 @@ def _write_material(w, sc, idx, m, ind):
     d = m.diffuse
     w('%s*MATERIAL_NAME %s' % (i2, _q(name)))
     w('%s*MATERIAL_CLASS "Standard"' % i2)
-    w('%s*MATERIAL_AMBIENT %s\t%s\t%s' % (i2, _f4(d[0]), _f4(d[1]), _f4(d[2])))
-    w('%s*MATERIAL_DIFFUSE %s\t%s\t%s' % (i2, _f4(d[0]), _f4(d[1]), _f4(d[2])))
+    w('%s*MATERIAL_AMBIENT %s\t%s\t%s' % (i2, _f(d[0]), _f(d[1]), _f(d[2])))
+    w('%s*MATERIAL_DIFFUSE %s\t%s\t%s' % (i2, _f(d[0]), _f(d[1]), _f(d[2])))
     w('%s*MATERIAL_SPECULAR 0.9000\t0.9000\t0.9000' % i2)
     w('%s*MATERIAL_SHINE 0.1000' % i2)
     w('%s*MATERIAL_SHINESTRENGTH 0.0000' % i2)
-    w('%s*MATERIAL_TRANSPARENCY %s' % (i2, _f4(m.transparency)))
+    w('%s*MATERIAL_TRANSPARENCY %s' % (i2, _f(m.transparency)))
     w('%s*MATERIAL_WIRESIZE 1.0000' % i2)
     w('%s*MATERIAL_SHADING Blinn' % i2)
     w('%s*MATERIAL_XP_FALLOFF 0.0000' % i2)
-    w('%s*MATERIAL_SELFILLUM %s' % (i2, _f4(m.self_illum)))
+    w('%s*MATERIAL_SELFILLUM %s' % (i2, _f(m.self_illum)))
     if m.two_sided:
         w('%s*MATERIAL_TWOSIDED' % i2)
     w('%s*MATERIAL_FALLOFF In' % i2)
@@ -1020,7 +1054,9 @@ def _write_material(w, sc, idx, m, ind):
                        5, tp.get(n, n), k + 1)
     if layers:
         n0, na0 = layers[0]
-        if m.map_opacity or na0:
+        # an alpha name without an opacity map comes from another material sharing the texture
+        # (the game keeps one record per texture): only the material with the map writes it
+        if m.map_opacity or (na0 and _alow(n0) not in _opacity_textures(sc)):
             _write_map(w, i2, '*MAP_OPACITY', 'Map #%d' % (m.index * 8 + 7), 6, tp.get(na0 or n0, na0 or n0), 1)
     w('%s}' % ind)
 
@@ -1028,19 +1064,27 @@ def _write_material(w, sc, idx, m, ind):
 def _write_tm(w, go, ind):
     w('%s*NODE_TM {' % ind)
     i2 = ind + '\t'
-    axis, ang, scale = _rows_to_axis_angle(go.rows)
+    rows, fr, es = go.rows, _f4, None
+    if go.exact_tm is not None:             # (models: exact, so that ENCODE gives the same Tm back)
+        rows = [[go.exact_tm[r][c] / 256.0 for c in range(3)] for r in range(3)]
+        fr = _f
+        es = _exact_scale(go.exact_tm)
+    axis, ang, scale = _rows_to_axis_angle(rows)
     w('%s*NODE_NAME %s' % (i2, _q(go.name)))
     w('%s*INHERIT_POS 0 0 0' % i2)
     w('%s*INHERIT_ROT 0 0 0' % i2)
     w('%s*INHERIT_SCL 0 0 0' % i2)
     for r in range(3):
-        w('%s*TM_ROW%d %s\t%s\t%s' % (i2, r, _f4(go.rows[r][0]), _f4(go.rows[r][1]), _f4(go.rows[r][2])))
+        w('%s*TM_ROW%d %s\t%s\t%s' % (i2, r, fr(rows[r][0]), fr(rows[r][1]), fr(rows[r][2])))
     p = go.pos
     w('%s*TM_ROW3 %s\t%s\t%s' % (i2, _f(p[0]), _f(p[1]), _f(p[2])))
     w('%s*TM_POS %s\t%s\t%s' % (i2, _f(p[0]), _f(p[1]), _f(p[2])))
     w('%s*TM_ROTAXIS %s\t%s\t%s' % (i2, _f4(axis[0]), _f4(axis[1]), _f4(axis[2])))
     w('%s*TM_ROTANGLE %s' % (i2, _f4(ang)))
-    w('%s*TM_SCALE %s\t%s\t%s' % (i2, _f4(scale[0]), _f4(scale[1]), _f4(scale[2])))
+    if es is not None:
+        w('%s*TM_SCALE %s\t%s\t%s' % (i2, _f(es[0] / 256.0), _f(es[1] / 256.0), _f(es[2] / 256.0)))
+    else:
+        w('%s*TM_SCALE %s\t%s\t%s' % (i2, _f4(scale[0]), _f4(scale[1]), _f4(scale[2])))
     w('%s*TM_SCALEAXIS 0.0000\t0.0000\t0.0000' % i2)
     w('%s*TM_SCALEAXISANG 0.0000' % i2)
     w('%s}' % ind)

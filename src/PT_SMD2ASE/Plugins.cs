@@ -13,8 +13,10 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
+using PTSmd;
 
 namespace PT_SMD2ASE
 {
@@ -36,10 +38,10 @@ namespace PT_SMD2ASE
         {
             get
             {
-                if (!Supported) return App == "Blender" ? "too old for the add-on (needs Blender 4.2 or newer)" : "too old for the plug-in (needs 3ds Max 2020 or newer)";
-                if (!Installed) return "plug-in not installed";
-                if (UpToDate) return "plug-in installed, up to date" + (InstalledVersion != null ? " (" + InstalledVersion + ")" : "");
-                return "older plug-in installed" + (InstalledVersion != null ? " (" + InstalledVersion + ")" : "") + " - update available";
+                if (!Supported) return L.T(App == "Blender" ? "plug.too_old_blender" : "plug.too_old_max");
+                if (!Installed) return L.T("plug.not_installed");
+                string v = InstalledVersion != null ? " (" + InstalledVersion + ")" : "";
+                return L.T(UpToDate ? "plug.up_to_date" : "plug.older", v);
             }
         }
     }
@@ -47,6 +49,7 @@ namespace PT_SMD2ASE
     public static class Plugins
     {
         public static readonly string[] MaxFiles = { "PT_ASE_Importer.ms", "PT_ASE_Exporter.ms", "PT_ASE_Reader.cs", "PT_ASE_Skin.cs" };
+        const string MaxConfig = "PT_ASE_Config.ms";
         const string BlenderZipName = "pt_ase_importer.zip";
         const string BlenderExtId = "pt_ase_smd_importer";
 
@@ -190,6 +193,40 @@ namespace PT_SMD2ASE
             return found.OrderBy(t => t.Version);
         }
 
+        /// <summary>A MAXScript string literal for text.</summary>
+        static string MsQuote(string text) =>
+            "\"" + text.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "\\n").Replace("\t", "\\t") + "\"";
+
+        /// <summary>A plug-in file as it is installed: the scripts in the window's language (their English
+        /// texts, the max.* keys of the language tables, replaced; UTF-8 with a byte-order mark, which
+        /// 3ds Max reads), everything else as it is.</summary>
+        public static byte[] MaxFileFor(string src, string file)
+        {
+            byte[] raw = File.ReadAllBytes(Path.Combine(src, file));
+            if (L.Current == "en" || !file.EndsWith(".ms", StringComparison.OrdinalIgnoreCase)) return raw;
+            string s = Encoding.UTF8.GetString(raw);
+            foreach (var key in L.Keys("en").Where(k => k.StartsWith("max.")))
+            {
+                string en = L.En(key), tr = L.T(key);
+                if (tr != en) s = s.Replace(MsQuote(en), MsQuote(tr));
+            }
+            var body = Encoding.UTF8.GetBytes(s);
+            var o = new byte[body.Length + 3];
+            o[0] = 0xEF; o[1] = 0xBB; o[2] = 0xBF;
+            Buffer.BlockCopy(body, 0, o, 3, body.Length);
+            return o;
+        }
+
+        static bool SameAsInstalled(string src, string file, string dir)
+        {
+            try
+            {
+                string p = Path.Combine(dir, file);
+                return File.Exists(p) && File.ReadAllBytes(p).SequenceEqual(MaxFileFor(src, file));
+            }
+            catch (Exception) { return false; }
+        }
+
         static void CheckMax(PluginTarget t)
         {
             string src = MaxSource;
@@ -199,8 +236,8 @@ namespace PT_SMD2ASE
             t.Where = inSystem ? t.SystemStartup : t.UserStartup;
             // every copy Max may load must be the current one
             t.UpToDate = t.Installed && src != null &&
-                         (!inSystem || MaxFiles.All(f => SameFile(Path.Combine(src, f), Path.Combine(t.SystemStartup, f)))) &&
-                         users.All(u => MaxFiles.All(f => SameFile(Path.Combine(src, f), Path.Combine(u, f))));
+                         (!inSystem || MaxFiles.All(f => SameAsInstalled(src, f, t.SystemStartup))) &&
+                         users.All(u => MaxFiles.All(f => SameAsInstalled(src, f, u)));
         }
 
         static IEnumerable<PluginTarget> FindBlender()
@@ -285,7 +322,7 @@ namespace PT_SMD2ASE
         static (bool, string) InstallMax(PluginTarget t)
         {
             string src = MaxSource;
-            if (src == null) return (false, "The 3dsMax plug-in files were not found next to PT_RosettaStone.exe (3dsMax folder).");
+            if (src == null) return (false, L.T("inst.max_missing"));
             var targets = new List<string>();
             bool inSystem = File.Exists(Path.Combine(t.SystemStartup, MaxFiles[0]));
             if (inSystem) targets.Add(t.SystemStartup);                                   // update the old copy where it is
@@ -293,17 +330,35 @@ namespace PT_SMD2ASE
             // language folder Max made gets one (Max started in that language reads only its own)
             foreach (var u in t.UserStartups)
                 if (File.Exists(Path.Combine(u, MaxFiles[0])) || !inSystem) targets.Add(u);
+            // the files in the window's language, ready to copy (also for a copy with administrator rights)
+            string staged = Path.Combine(Path.GetTempPath(), "pt_max_plugin_" + L.Current);
+            var files = MaxFiles.ToList();
+            try
+            {
+                Directory.CreateDirectory(staged);
+                foreach (var f in MaxFiles) File.WriteAllBytes(Path.Combine(staged, f), MaxFileFor(src, f));
+                // where the converter is, so the plug-in opens game files (.smd, .smb) itself
+                string conv = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "smd2ase.exe");
+                if (File.Exists(conv))
+                {
+                    File.WriteAllText(Path.Combine(staged, MaxConfig),
+                        "-- written by PT_RosettaStone.exe: its converter, for opening game files in 3ds Max\r\n" +
+                        "global PTASE_Converter = @\"" + conv + "\"\r\n", new UTF8Encoding(true));
+                    files.Add(MaxConfig);
+                }
+            }
+            catch (Exception e) { return (false, t.Name + ": " + e.Message); }
             foreach (var dir in targets)
             {
                 try
                 {
                     Directory.CreateDirectory(dir);
-                    foreach (var f in MaxFiles) File.Copy(Path.Combine(src, f), Path.Combine(dir, f), true);
+                    foreach (var f in files) File.Copy(Path.Combine(staged, f), Path.Combine(dir, f), true);
                 }
                 catch (UnauthorizedAccessException)
                 {
                     // Max's own folder is under Program Files: copy with administrator rights
-                    string cmd = string.Join(" & ", MaxFiles.Select(f => "copy /y \"" + Path.Combine(src, f) + "\" \"" + Path.Combine(dir, f) + "\""));
+                    string cmd = string.Join(" & ", files.Select(f => "copy /y \"" + Path.Combine(staged, f) + "\" \"" + Path.Combine(dir, f) + "\""));
                     try
                     {
                         var p = Process.Start(new ProcessStartInfo("cmd.exe", "/c " + cmd)
@@ -312,21 +367,21 @@ namespace PT_SMD2ASE
                     }
                     catch (System.ComponentModel.Win32Exception)
                     {
-                        return (false, t.Name + ": permission was refused - copy the 4 files from the 3dsMax folder into " + dir + " yourself.");
+                        return (false, L.T("inst.refused", t.Name, dir));
                     }
                 }
                 catch (Exception e) { return (false, t.Name + ": " + e.Message); }
             }
             CheckMax(t);
-            if (!t.UpToDate) return (false, t.Name + ": the files could not be copied to " + string.Join(" and ", targets) + ".");
-            string after = Running("3dsmax") ? " Restart 3ds Max to load it." : " Start 3ds Max: the PT Tools are under Customize → Customize User Interface → Toolbars → Category \"PT Tools\".";
-            return (true, t.Name + ": plug-in installed in " + string.Join(" and ", targets) + "." + after);
+            if (!t.UpToDate) return (false, L.T("inst.not_copied", t.Name, string.Join(L.T("inst.and"), targets)));
+            string after = L.T(Running("3dsmax") ? "inst.max_restart" : "inst.max_start");
+            return (true, L.T("inst.max_ok", t.Name, string.Join(L.T("inst.and"), targets)) + after);
         }
 
         static (bool, string) InstallBlender(PluginTarget t)
         {
             string zip = BlenderZip;
-            if (zip == null) return (false, "Blender\\" + BlenderZipName + " was not found next to PT_RosettaStone.exe.");
+            if (zip == null) return (false, L.T("inst.zip_missing", BlenderZipName));
             var psi = new ProcessStartInfo(t.Exe, "-c extension install-file -r user_default -e \"" + zip + "\"")
             {
                 UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
@@ -339,21 +394,20 @@ namespace PT_SMD2ASE
                 {
                     var err = p.StandardError.ReadToEndAsync();
                     output = p.StandardOutput.ReadToEnd();
-                    if (!p.WaitForExit(180000)) { try { p.Kill(); } catch (Exception) { } return (false, t.Name + ": Blender did not finish installing in 3 minutes."); }
+                    if (!p.WaitForExit(180000)) { try { p.Kill(); } catch (Exception) { } return (false, L.T("inst.timeout", t.Name)); }
                     output += err.Result;
                     code = p.ExitCode;
                 }
             }
-            catch (Exception e) { return (false, t.Name + ": could not run Blender - " + e.Message); }
+            catch (Exception e) { return (false, L.T("inst.no_run", t.Name, e.Message)); }
             string status = output.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.StartsWith("STATUS") || l.StartsWith("ERROR") || l.StartsWith("FATAL")) ?? "";
             var before = t.InstalledVersion;
             var fresh = FindBlender().FirstOrDefault(x => string.Equals(x.Exe, t.Exe, StringComparison.OrdinalIgnoreCase));
             if (fresh != null) { t.Installed = fresh.Installed; t.UpToDate = fresh.UpToDate; t.InstalledVersion = fresh.InstalledVersion; }
             if (code != 0 || !t.Installed)
-                return (false, t.Name + ": install failed" + (status.Length > 0 ? " - " + status : " (exit code " + code + ")") +
-                               ". Install Blender\\" + BlenderZipName + " with Edit → Preferences → Get Extensions → Install from Disk.");
-            string after = Running("blender") ? " Restart Blender to load it." : "";
-            return (true, t.Name + ": add-on " + (before != null ? "updated" : "installed") + " and enabled (File → Import → Priston Tale / 3ds Max ASE)." + after);
+                return (false, L.T("inst.failed", t.Name, status.Length > 0 ? " - " + status : L.T("inst.exit_code", code), BlenderZipName));
+            string after = Running("blender") ? L.T("inst.bl_restart") : "";
+            return (true, L.T(before != null ? "inst.bl_updated" : "inst.bl_installed", t.Name) + after);
         }
     }
 }

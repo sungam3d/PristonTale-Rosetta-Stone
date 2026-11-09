@@ -25,9 +25,46 @@ namespace PT_SMD2ASE
                 SelfTest(args[1], args[2], args[3], args[4], args.Length > 5 ? args[5] : null, args.Length > 6 ? args[6] : null);
                 return;
             }
+            if (args.Length >= 3 && args[0] == "--langshot")
+            {
+                LangShot(args[1], args[2], args.Length > 3 ? args[3] : null);
+                return;
+            }
             // files/folders dropped onto the exe icon arrive as arguments
             var paths = args.Where(a => File.Exists(a) || Directory.Exists(a)).ToArray();
-            Application.Run(new MainForm(paths));
+            while (true)
+            {
+                var lang = Settings.Load().Lang;
+                PTSmd.L.Set(string.IsNullOrEmpty(lang) ? PTSmd.L.SystemDefault : lang);
+                var f = new MainForm(paths);
+                Application.Run(f);
+                if (!f.RestartForLanguage) break;            // (the language was changed: open the window again in it)
+                paths = new string[0];
+            }
+        }
+
+        /// <summary>A screenshot of the window in one language (optionally with something dropped on DECODE,
+        /// without converting it): for checking that every language fits.</summary>
+        static void LangShot(string code, string png, string input)
+        {
+            MainForm.QuietForTests = true;
+            PTSmd.L.Set(code);
+            var f = new MainForm(null) { NoSaveForTests = true };
+            var timer = new Timer { Interval = 2500 };
+            timer.Tick += (s, e) =>
+            {
+                timer.Stop();
+                if (input != null) f.TestShowOnly(new[] { input });
+                Application.DoEvents();
+                using (var bmp = new Bitmap(f.Width, f.Height))
+                {
+                    f.DrawToBitmap(bmp, new Rectangle(0, 0, f.Width, f.Height));
+                    bmp.Save(png, ImageFormat.Png);
+                }
+                f.Close();
+            };
+            f.Shown += (s, e) => timer.Start();
+            Application.Run(f);
         }
 
 #if NETFRAMEWORK

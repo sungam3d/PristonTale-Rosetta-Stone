@@ -129,7 +129,7 @@ namespace PTSmd
             if (data.Length >= 2 && ((data[0] == 'A' && data[1] == '8') || (data[0] == 'G' && data[1] == '8'))) return data;
             if (data.Length >= 26 && data[0] == 'B' && data[1] == 'M') return BmpForGame((byte[])data.Clone(), notes);
             if (data.Length >= 18 && data[1] <= 1 && TgaHeaderOk(data, 0, long.MaxValue)) return TgaForGame(data, notes);
-            notes.Add("not a BMP or TGA the game can read - save it as a 24-bit BMP or an uncompressed 24/32-bit TGA");
+            notes.Add(L.T("tex.unknown"));
             return data;
         }
 
@@ -150,9 +150,9 @@ namespace PTSmd
                     if (plain) { comp = 0; Put32(d, 30, 0); if (hdr == 40) masks = 12; }
                 }
                 if (!(bpp == 8 || bpp == 24 || bpp == 32))
-                    notes.Add(bpp + "-bit BMP: the game reads 8, 24 and 32-bit BMPs - save it as 24-bit");
+                    notes.Add(L.T("tex.bmp_bits", bpp));
                 else if (comp != 0)
-                    notes.Add("compressed BMP: the game reads only uncompressed BMPs - save it without compression");
+                    notes.Add(L.T("tex.bmp_compressed"));
                 else
                 {
                     int pal = bpp == 8 ? (used > 0 && used <= 256 ? used : 256) * 4 : 0;
@@ -160,7 +160,7 @@ namespace PTSmd
                     int rows = Math.Abs(h);
                     long stride = ((long)w * bpp + 31) / 32 * 4, pix = stride * rows;
                     if (w <= 0 || rows == 0 || off < 14 + hdr + masks || off + pix > d.Length)
-                        notes.Add("damaged BMP (the pixels do not fit in the file)");
+                        notes.Add(L.T("tex.bmp_damaged"));
                     else if (off != want || h < 0)
                     {
                         var o = new byte[want + pix];
@@ -168,8 +168,8 @@ namespace PTSmd
                         if (pal > 0) Buffer.BlockCopy(d, 14 + hdr + masks, o, 14 + hdr, (int)Math.Min(pal, off - 14 - hdr - masks));
                         for (int r = 0; r < rows; r++)
                             Buffer.BlockCopy(d, (int)(off + (h < 0 ? rows - 1 - r : r) * stride), o, (int)(want + r * stride), (int)stride);
-                        if (h < 0) { Put32(o, 22, rows); notes.Add("top-down BMP turned bottom-up (the game reads bottom-up rows)"); }
-                        if (off != want) notes.Add("pixels moved right behind the header (the game does not read the pixel offset)");
+                        if (h < 0) { Put32(o, 22, rows); notes.Add(L.T("tex.bmp_flipped")); }
+                        if (off != want) notes.Add(L.T("tex.bmp_moved"));
                         Put32(o, 10, want);
                         d = o;
                     }
@@ -186,7 +186,7 @@ namespace PTSmd
             int w = d[12] | d[13] << 8, h = d[14] | d[15] << 8, bpp = d[16];
             if (type == 1 || type == 9)
             {
-                notes.Add("colour-mapped TGA: the game reads only true-colour TGAs - save it as 24 or 32-bit");
+                notes.Add(L.T("tex.tga_cmap"));
                 return d;
             }
             int px = (bpp + 7) / 8;
@@ -196,7 +196,7 @@ namespace PTSmd
             bool rle = type == 10 || type == 11, gray = type == 3 || type == 11;
             if (!rle && !gray && idLen == 0 && cmapLen == 0)
             {
-                if (bpp != 16 && bpp != 24 && bpp != 32) notes.Add(bpp + "-bit TGA: the game reads 16, 24 and 32-bit TGAs");
+                if (bpp != 16 && bpp != 24 && bpp != 32) notes.Add(L.T("tex.tga_bits", bpp));
                 var e = (byte[])d.Clone();
                 Encode(e);
                 return e;
@@ -205,16 +205,16 @@ namespace PTSmd
             if (rle)
             {
                 pix = Unrle(d, start, n, px);
-                if (pix == null) { notes.Add("damaged RLE data in the TGA"); return d; }
-                notes.Add("RLE-packed TGA unpacked (the game reads only uncompressed TGAs)");
+                if (pix == null) { notes.Add(L.T("tex.tga_rle_damaged")); return d; }
+                notes.Add(L.T("tex.tga_rle"));
             }
             else
             {
-                if (start + n * px > d.Length) { notes.Add("damaged TGA (the pixels do not fit in the file)"); return d; }
+                if (start + n * px > d.Length) { notes.Add(L.T("tex.tga_damaged")); return d; }
                 pix = new byte[n * px];
                 Buffer.BlockCopy(d, start, pix, 0, pix.Length);
             }
-            if (idLen > 0 || cmapLen > 0) notes.Add("TGA image ID / colour map left out (the game reads the pixels right after the header)");
+            if (idLen > 0 || cmapLen > 0) notes.Add(L.T("tex.tga_id"));
             int obpp = bpp;
             if (gray)
             {
@@ -230,11 +230,11 @@ namespace PTSmd
                         if (op == 4) c[i * op + 3] = pix[i * px + 1];
                     }
                     pix = c;
-                    notes.Add("grey TGA saved as colour (the game reads 16, 24 and 32-bit TGAs)");
+                    notes.Add(L.T("tex.tga_grey"));
                 }
-                else notes.Add(bpp + "-bit grey TGA: the game cannot read it - save it as a 24-bit TGA");
+                else notes.Add(L.T("tex.tga_grey_bits", bpp));
             }
-            else if (bpp != 16 && bpp != 24 && bpp != 32) notes.Add(bpp + "-bit TGA: the game reads 16, 24 and 32-bit TGAs");
+            else if (bpp != 16 && bpp != 24 && bpp != 32) notes.Add(L.T("tex.tga_bits", bpp));
             var o = new byte[18 + pix.Length];
             Buffer.BlockCopy(d, 8, o, 8, 8);                         // origin, width, height
             o[2] = 2;

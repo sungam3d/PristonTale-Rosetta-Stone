@@ -334,7 +334,55 @@ real `Field\Lost\lostisland.ase`. Textures found next to a model (when the path 
 place below the game folder too: 18 names are used by different pictures in different folders (`eveninghill.tga` in
 six sky folders), and the first one used to stand in for all of them.
 
-## Status (v1.4.1)
+## ASE → SMD / SMB: the game's builder (v1.5.0)
+
+ENCODE builds `.smd` / `.smb` from `.ase` itself (`src\PTSmd\AseToSmd.cs` for maps, `AseToSmdModel.cs` for models),
+ported line by line from the 2012 source: `smRead3d.cpp` (`smSTAGE3D_ReadASE`, `ReadASE_LIGHTMAP_MATERIAL`,
+`smSTAGE3D_ReadASE_GEOMOBJECT`, `smReadASE_LIGHTOBJECT`, `smASE_Read`, `smASE_ReadBone`, `ReadASE_GEOMOBJECT`),
+`smStage3d.cpp` (shading, light, area grid, `SaveFile`), `smObj3d.cpp` (`SortVertex`, `SetGNormals`, `ReformTM`,
+`ReformPhysique`, `SaveFile`), `smTexture.cpp` (`AddMaterial`, texture records) and `smmatrix.cpp`. The game's quirks
+are kept: lines read 254 characters at a time; `ASE_MATERIAL` kept as its 852 bytes, because materials are merged by a
+weak checksum of them (never into material 0) and the light-map step copies blocks of them (one copy counts bytes, not
+materials); a vertex colour averaged together with a white one; an untextured object gets material 0 and one empty
+texture link; `MESH_MTLID` not wrapped; `NaN` → 0 in normals; an empty bitmap name gets the debug build's `0xCC`.
+
+Checked against the game's own builds (`scripts\check_ase2smd.py`, `check_ase2model.py`):
+- **41 maps of 2012**: vertex positions, faces, area grid, materials and lights exact on all but village-2 (its `.ase`
+  is a later version than its `.smd`). 31 are exact up to float steps (UVs and normals: some maps were built with the
+  FPU in single precision, others in double; the mode is not recoverable). Dun-1..3 were built by an engine that still
+  shaded light-mapped maps; a few maps merge one or two duplicate materials more than the port (texture-record and
+  checksum effects of the developer's session).
+- **337 models of 2012**: every vertex position, face, UV, animation key and material exact; 182 byte-equal, the rest
+  store vertex normals in an older form (object header without the `0x80000000` flag: averaged normal, turned but not
+  moved). The shipped files mix both; ENCODE writes the 2012 form.
+
+Things found on the way:
+- **Current clients store map area lists with 32-bit face numbers** (buffer `Σ(4·count+1)`), 2012 clients with 16-bit
+  ones (`Σ(2·count+1)`): the "2012 client" layout setting picks the old form.
+- **Map lighting**: `SetVertexShade` uses the stage's `Contrast` / `Bright` / light vector, set from the client's config
+  before the build: 300 / 130 / (0, −372, −93) for most maps, 300 / 160 / (256, −256, 128) for eight (village-1,
+  forever-fall-03/04, pilai, ice_ura, ruin-2, the login and opening stages). ENCODE takes them from an existing `.smd`
+  of the map, else from a table of the client's maps.
+- **Files from our own tools** (decoder and both exporters, told apart by `*COMMENT`): vertex colours are the finished
+  lighting (used as they are; the decoder now writes them unclamped and in R,G,B order — the game stores B,G,R,A);
+  texture layer k takes `MESH_MAPPINGCHANNEL` k+1; a light's range is `LIGHT_ATTNEND × 256`; positions are rounded,
+  not truncated (3ds Max and Blender write world positions with float noise). Bones are the `Bip…` objects, plus any
+  material-less object a skin uses or that has keys. The decoder writes model node matrices exactly (`Tm / 256`, with a
+  `TM_SCALE` whose average reads back as 256), so decode → encode → decode is stable.
+- **Faces in one spot**: for walking the game gathers the faces of the 2 × 2 cells around a character with a corner in
+  its height band into `smFaceList[1000]` (`MakeAreaFaceList`, no bounds check). Every 2012 map stays at 991 or less;
+  current clients' newer maps reach ~2200, so their list is bigger. An added 4096-face teapot crashed a 2012-based
+  client in testing (a box did not); ENCODE warns above 1000.
+- **Merged class motion files** (`m1.smb` …) hold a table of the motion files they were joined from (`TmFrame`); the
+  decoder writes one continuous timeline and ENCODE writes it without the table, which the game plays the same way
+  (it searches the whole key list).
+
+Round trips over the current client (`scripts\roundtrip_maps.py`, `stable_models.py`): every map comes back with every
+face, winding, colour, normal and light; 29 of 61 identical, the rest differ only in empty texture links of untextured
+faces and in which material registered a shared texture's alpha first. Confirmed in a 2012-based client: an edited
+village with an added box loads, and characters walk around it.
+
+## Status (v1.5.0)
 
 Done and verified (see `src\README_SOURCE.md` for the check list):
 1. Converter (C# exe + Python reference, byte-identical): skeleton lookup (`.inx`/`.ini` → class skeleton from the file
@@ -349,7 +397,10 @@ Done and verified (see `src\README_SOURCE.md` for the check list):
    (registry) and Blender 4.2+ and installs or updates the plug-ins (Max: the user's own startup scripts folder, or an
    older copy in Max's folder where it is; Blender: `blender -c extension install-file -r user_default -e`).
 
+5. ASE → SMD / SMB (above): maps and models, from the developers' files and from our own; 3ds Max import window with
+   one-click choices (map as in the game / for editing, character animated / T-pose / mesh only, animation only onto
+   the scene's character), separate export window, menus, game files opened directly.
+
 Not done:
-- Replacing the animation of monsters that keep it in a separate (often glued) motion file: their model and skin can
-  be exported, the motion file stays the game's own.
-- The game's own ASE → SMD/SMB rebuild can only be tested in the game.
+- Merged class motion files keep one continuous timeline instead of their pieces.
+- Most of it is tested in the game by one user so far: please report what you find.

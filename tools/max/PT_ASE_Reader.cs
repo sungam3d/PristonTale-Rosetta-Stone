@@ -1646,8 +1646,8 @@ namespace PTAse
             }
             double[] df = md.Diffuse;
             sb.Append("s = standardmaterial name:").Append(U.MS(md.Name))
-              .AppendFormat(CultureInfo.InvariantCulture, " diffuse:(color {0} {1} {2}) ambient:(color {0} {1} {2})",
-                (int)(df[0] * 255), (int)(df[1] * 255), (int)(df[2] * 255))
+              .AppendFormat(CultureInfo.InvariantCulture, " diffuse:(color {0:R} {1:R} {2:R}) ambient:(color {0:R} {1:R} {2:R})",
+                df[0] * 255, df[1] * 255, df[2] * 255)          // (exact: the exporter writes it back for the game)
               .Append(" twoSided:").Append(md.TwoSided ? "true" : "false").Append("\n");
             sb.Append("s.specularLevel = 0; s.glossiness = 10\n");
             bool hasTex = md.DiffuseMap != null && md.DiffuseMap.Bitmap != "";

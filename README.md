@@ -37,8 +37,8 @@ and compiled model info come out as ordinary files any program reads.
 | **Sounds** | The game's `.wav` files start with `JODO` instead of `RIFF`. They come out playable, and so does the music (`.bgm`). |
 | **Text** | `.ini` `.inf` `.in` `.sin` `.msg` `.txt` `.lua` … are Korean in code page 949. They come out as UTF-8, readable in any editor. |
 | **Model info** | Every compiled `.inx` (monsters, NPCs, player models) is rebuilt as the `.ini` / `.inf` / `.in` it was made from: model files, detail levels, and every animation's frames and key events. |
-| **3ds Max and Blender plug-ins** | Import with textures, skeletons and animation; export back to `.ase` in the same layout as the developers' own files, so the game can rebuild its `.smd` / `.smb`. Installed with one click. |
-| **Back to the game** | Edited model info, textures, sounds and text go back into the exact forms the game reads. The `.inx` compiler gives byte for byte the game's own (checked on all 2 455 `.inx` files of a current client). |
+| **3ds Max and Blender plug-ins** | Import with textures, skeletons and animation in one click (map as in the game, map for editing, character animated or in T-pose, or just a new animation onto a character); export back to `.ase` in the same layout as the developers' own files. Installed with one click. |
+| **Back to the game** | Edited maps and models (`.ase`) are built into the game's `.smd` / `.smb` the way the game's own builder does it; model info, textures, sounds and text go back into the exact forms the game reads. Checked against the game's own builds: 41 maps and 337 models of 2012, and every map and model of a current client decoded and built again. The `.inx` compiler gives byte for byte the game's own (all 2 455 `.inx` files of a current client). |
 
 <p>
   <img src="src/Guide/Guide_images/max_map.png" alt="A map split into its objects in 3ds Max" width="49%">
@@ -107,7 +107,7 @@ PT-Readable\
 | Option | What it does |
 |---|---|
 | Copy + decrypt textures | Writes readable copies of the textures; the `.ase` points at them. Leave it ticked. |
-| Baked vertex lighting | Keeps the game's lighting and shadows on maps. Untick it for maps you will put back into the game. |
+| Baked vertex lighting | Keeps the game's lighting and shadows on maps. Leave it ticked: ENCODE gives the map exactly this lighting back. |
 | Stage lights | Writes a map's light points (lamps, fires) as lights. |
 | Split maps into separate objects | Cuts a map into terrain, buildings, trees… close to how the original `.ase` files were made. Untick for one mesh. |
 | Collision walls | The invisible walls of a map: separate object (easy to hide), keep in mesh, or remove. |
@@ -177,9 +177,10 @@ The window finds every 3ds Max (2020 or newer) and Blender (4.2 or newer) on you
 ![The plug-in panel](docs/images/plugins_panel.png)
 
 - **3ds Max:** the plug-in goes into your own scripts folder, so it needs no administrator rights. If you put an older
-  copy into 3ds Max's own folder by hand, that copy is updated where it is (Windows asks for permission). Restart Max,
-  then **Customize → Customize User Interface → Toolbars → Category "PT Tools"**: drag **PT ASE Import** and
-  **PT Motions** onto a toolbar.
+  copy into 3ds Max's own folder by hand, that copy is updated where it is (Windows asks for permission). Restart Max:
+  a **Priston Tale** menu appears in the menu bar (**Import… / Export… / Motions…**), and the importer and exporter
+  are also under **File → Import** and **File → Export**. The installer also tells the plug-in where the converter is,
+  so it opens the game's own `.smd` / `.smb` files directly.
 - **Blender:** Blender installs and switches on the add-on itself. Close Blender first.
 
 By hand: copy the four files from the release's `3dsMax\` folder into `<3ds Max>\scripts\startup\`. In Blender,
@@ -192,16 +193,34 @@ By hand: copy the four files from the release's `3dsMax\` folder into `<3ds Max>
 
 ### Import
 
-- **3ds Max:** click **PT ASE Import**, then **Import ASE file(s)…** or **Import all ASE in a folder…**.
+- **3ds Max:** **Priston Tale → Import…**. Answer *What are you importing?* with one click, then **Import file(s)…**
+  (`.ase`, or the game's `.smd` / `.smb` directly) or **Import a whole folder…**:
+
+  | Choice | Gives you |
+  |---|---|
+  | Map – as seen in the game | textures and baked lighting exactly as in the game; collision walls hidden |
+  | Map – for editing and exporting | everything to change the map and export it again: collision walls visible on their own layer, lights included |
+  | Character / monster – animated | skeleton, skin and animation (armour uses its class file, e.g. `m1.smb`, found next to it) |
+  | Character / monster – T-pose, with bones | skeleton and skin in the bind pose, no animation |
+  | Character / monster – mesh only | the mesh without a skeleton |
+  | Animation only | puts another animation file (`m1.smb` … `m8.smb`, or a monster's) on the character already in the scene |
+
+  The single settings are under **Advanced options** (closed); each choice fills them in.
+
+  <p>
+    <img src="src/Guide/Guide_images/max_import.png" alt="The 3ds Max import window" width="24%">
+    <img src="src/Guide/Guide_images/max_export.png" alt="The 3ds Max export window" width="24%">
+  </p>
 - **Blender:** **File → Import → Priston Tale / 3ds Max ASE (.ase)**.
 
-Characters and monsters come in skinned and animated. Pick a motion from the **PT Motions** list (3ds Max) or the
-**PT** tab of the side panel (press **N**, Blender) and press play. *Pose: T-pose* loads only the bones, in their rest pose.
+Characters and monsters come in skinned and animated. Pick a motion from the **PT Motions** list (3ds Max:
+**Priston Tale → Motions…**) or the **PT** tab of the side panel (press **N**, Blender) and press play.
+
+![A Knight armour imported in T-pose, then given the class animation m1.smb with "Animation only"](src/Guide/Guide_images/max_anim_only.png)
 
 <p>
-  <img src="src/Guide/Guide_images/max_dialog.png" alt="The 3ds Max importer" width="32%">
-  <img src="src/Guide/Guide_images/max_motions.png" alt="PT Motions in 3ds Max" width="32%">
-  <img src="src/Guide/Guide_images/blender_import_options.png" alt="The Blender importer" width="32%">
+  <img src="src/Guide/Guide_images/max_motions.png" alt="PT Motions in 3ds Max" width="49%">
+  <img src="src/Guide/Guide_images/blender_import_options.png" alt="The Blender importer" width="49%">
 </p>
 
 Textures are found next to the `.ase`, anywhere in the converted output folder (also after you move or share it), or in
@@ -209,9 +228,9 @@ an **Extra texture folder** you pick; the game's own scrambled textures work the
 
 ### Export
 
-Select what to export and use **Export selected as ASE…** (3ds Max) or
-**File → Export → Priston Tale / 3ds Max ASE (.ase)** (Blender), with the **same name as the original `.smd`**.
-Keep *Copy textures* ticked.
+**Priston Tale → Export…** (3ds Max: *Selected objects* or *Everything in the scene*; keep *Include hidden objects*
+ticked for maps, their collision walls are hidden) or **File → Export → Priston Tale / 3ds Max ASE (.ase)** (Blender),
+with the **same name as the original `.smd`**. Keep *Copy textures* ticked. Then drop the `.ase` on **ENCODE**.
 
 <p>
   <img src="src/Guide/Guide_images/blender_7_export_menu.png" alt="Blender export menu" width="49%">
@@ -231,6 +250,8 @@ Drop your edited files, or the whole output folder, on the orange **ENCODE** box
 
 | You edited | Becomes |
 |---|---|
+| `.ase` map | the map's `.smd`, built the way the game builds it |
+| `.ase` model (weapon, item, map prop, monster, armour) | its `.smd`, and the `.smb` (bones and animation) for a monster with its animation inside, a motion file or a prop on bones |
 | `.ini` / `.inf` / `.in` model info | `.inx`, byte for byte what the game compiles, plus the text in the game's code page |
 | `.bmp` / `.tga` | the game's scrambled texture |
 | `.wav` | the game's sound header |
@@ -243,7 +264,15 @@ upside-down BMPs are flipped, and wave files with extra chunks (most sound edito
 
 **Read the `note` lines in the log.** They say what was changed, or what the game would not read the way you meant:
 an unknown weapon, class or skill name, a `// comment` after a motion's frames, a character the Korean code page
-doesn't have, a float or 24-bit sound.
+doesn't have, a float or 24-bit sound, or too many faces in one spot of a map.
+
+An `.ase` outside a game folder still lands in the right place: a map exported from one the converter made is named after
+it (`village2.ase` → `field\ricarten\village-2.smd`), a model goes to the game folder its textures came from. A map keeps
+the lighting the game's map had (two settings exist; the right one is picked for every map of the game).
+
+**Keep detail low where characters walk.** For walking, older clients (built on the 2012 code) take the faces of the
+few metres around a character into a list of 1000, and crash when there are more; every original map stays under that.
+ENCODE warns with the place in 3ds Max coordinates: a 4096-face teapot does it, a box does not.
 
 ![Encode with notes in the log](docs/images/encode_notes.png)
 
@@ -254,24 +283,21 @@ doesn't have, a float or 24-bit sound.
 
 ## Putting your work back into the game
 
-When the game finds an `.ase` without a matching `.smd`, it builds the `.smd` (and for animated models the `.smb`)
-itself when it starts.
-
 1. **Back up** the original files.
 2. Export with the **same name** as the original `.smd` (`fore-1.ase` for `fore-1.smd`, `Tees.ase` for `Tees.smd`).
-3. Copy the `.ase` and its textures into the original's folder in the game.
-4. Remove or rename the old files the game should rebuild:
+3. Drop the `.ase` (and its textures, model info, sounds …) on **ENCODE**.
+4. Copy what ENCODE wrote into `game_format` over the game's files:
 
-| Model | Remove | Keep |
+| Model | ENCODE writes | The game keeps using |
 |---|---|---|
 | Maps, map objects, weapons, items | its `.smd` | |
 | Player armour, heads, costumes | its `.smd` | the class files `m1.smb` … `m8.smb` |
 | Monster with its animation in the same file (e.g. `Tees`) | its `.smd` and `.smb` | its `.inx` |
 | Monster with a separate motion file (e.g. `MonGknight-model` + `mGknight`) | the model's `.smd` | the motion `.smb` and the `.inx` |
+| A motion file (`m1.ase` … `m8.ase`, `mGknight.ase`) | its `.smb` | |
 
-5. Model info, textures and sounds you changed: copy them from `game_format` over the game's files.
-
-For maps going back into the game, convert with **Baked vertex lighting** unticked, or the game lights them twice.
+The game's own builder still works too: an `.ase` without a matching `.smd` next to it is built when the game starts,
+in clients that kept that code.
 
 ---
 
@@ -282,7 +308,7 @@ For maps going back into the game, convert with **Baked vertex lighting** untick
 ```
 smd2ase "<game>\Field" -o D:\PT-ASE --textures              models and maps -> .ase
 smd2ase --client "<game>" -o D:\PT-Readable                 the whole game folder (like DECODE)
-smd2ase --to-game D:\PT-Readable\char\monster\Tees -o D:\PT-Game    edited files -> game (like ENCODE)
+smd2ase --to-game D:\PT-Readable\char\monster\Tees -o D:\PT-Game    edited files (also .ase) -> game (like ENCODE)
 smd2ase --check-inx "<game>"                                every .inx decompiles and compiles back exactly?
 smd2ase --help                                              every option
 ```
@@ -293,15 +319,16 @@ smd2ase --help                                              every option
 
 | | |
 |---|---|
-| **"PT Tools" is missing in 3ds Max** | Check the window shows the plug-in as installed (or that the 4 files are in `scripts\startup`), then restart 3ds Max. |
+| **The Priston Tale menu is missing in 3ds Max** | Check the window shows the plug-in as installed (or that the 4 files are in `scripts\startup`), then restart 3ds Max. The macros are also under **Customize → Customize User Interface → Category "PT Tools"**. |
+| **The game crashes near something I added** | Too many faces in one spot: read the ENCODE note and use a simpler model there. |
 | **The model is white or untextured** | Keep the output folder together, or set *Extra texture folder*. Textures the game itself doesn't have are listed in `missing_textures.txt`. |
 | **A character comes in T-pose** | Check *Pose* is *Animated* and the class file (`m1_motions.ase` … `m8_motions.ase`) is next to the `.ase`. |
 | **The add-on is missing in Blender** | Close Blender, click **Reinstall** in the window, and start Blender again. |
 | **Nothing shows after importing** | Maps sit far from the centre: zoom to everything (Shift+Ctrl+Z in 3ds Max, Home in Blender). |
-| **The game doesn't show my change** | Check the file name matches the original and the old `.smd` / `.smb` is removed (table above), and read the ENCODE notes. |
+| **The game doesn't show my change** | Check the file name matches the original, the files from `game_format` replaced the game's (table above), and read the ENCODE notes. |
 
-Known limits: monsters that keep their animation in a separate motion file can have their model and skin edited, but not
-their animation replaced yet. The game's own rebuild from `.ase` can only be tested in the game: please report what you find.
+Known limits: a class motion file (`m1.smb` …) comes back as one continuous timeline rather than the pieces the game
+joined it from (the game plays it the same way). Please report what you find in the game.
 
 ---
 
