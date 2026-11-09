@@ -54,7 +54,15 @@ namespace PT_SMD2ASE
             timer.Tick += (s, e) =>
             {
                 timer.Stop();
-                if (input != null) f.TestShowOnly(new[] { input });
+                var shotOut = Environment.GetEnvironmentVariable("PTSHOT_OUT");
+                if (!string.IsNullOrEmpty(shotOut)) f.TestSetOut(shotOut);       // (not the user's saved folder)
+                if (input != null && input.StartsWith("encode:"))
+                {
+                    f.TestEncode(new[] { input.Substring(7) });               // (run ENCODE, shoot when done)
+                    while (f.TestBusy) { Application.DoEvents(); System.Threading.Thread.Sleep(50); }
+                    for (int i = 0; i < 20; i++) { Application.DoEvents(); System.Threading.Thread.Sleep(25); }
+                }
+                else if (input != null) f.TestShowOnly(new[] { input });
                 Application.DoEvents();
                 using (var bmp = new Bitmap(f.Width, f.Height))
                 {
